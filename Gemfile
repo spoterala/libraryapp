@@ -32,5 +32,10 @@ gem "bootsnap", require: false
 group :development, :test do
   # See https://guides.rubyonrails.org/debugging_rails_applications.html#debugging-with-the-debug-gem
   gem "debug", platforms: %i[ mri windows ], require: "debug/prelude"
-  gem "rspec", "~> 3.13.2"
+
+  # RSpec with Rails integration (pulls in rspec 3.13) [https://github.com/rspec/rspec-rails]
+  gem "rspec-rails", "~> 8.0"
+
+  # Test data factories; in development too so generators create factory files [https://github.com/thoughtbot/factory_bot_rails]
+  gem "factory_bot_rails", "~> 6.5"
 end

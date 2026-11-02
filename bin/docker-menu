@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# Interactive menu for common Docker tasks in this project.
+# Usage: bin/docker-menu
+
+# Always run from the project root, wherever the script is called from
+cd "$(dirname "$0")/.." || exit 1
+
+APP_URL="http://localhost:3000"
+
+if [ -t 1 ]; then
+  BOLD=$'\e[1m'; GREEN=$'\e[32m'; RED=$'\e[31m'; RESET=$'\e[0m'
+else
+  BOLD=""; GREEN=""; RED=""; RESET=""
+fi
+
+# Run a command, then report whether it succeeded
+run() {
+  echo "${BOLD}> $*${RESET}"
+  if "$@"; then
+    echo "${GREEN}Done.${RESET}"
+  else
+    echo "${RED}Failed (exit code $?).${RESET}"
+  fi
+}
+
+run_app() {
+  # --build picks up Gemfile/Dockerfile changes; it's quick when nothing changed
+  run docker compose up --detach --build --wait && echo "App is running at ${APP_URL}"
+}
+
+# One-off command in a temporary web container. -T and </dev/null keep it from
+# reading the menu's input (otherwise it swallows what you type next).
+run_in_web() {
+  run docker compose run --rm -T web "$@" </dev/null
+}
+
+run_migrations() {
+  run_in_web bin/rails db:migrate
+}
+
+run_tests() {
+  local color=()
+  [ -t 1 ] && color=(--force-color)
+  run_in_web bundle exec rspec "${color[@]}"
+}
+
+stop_app() {
+  run docker compose down
+}
+
+# Gems live in the image, so after bundle install updates Gemfile.lock the image
+# is rebuilt; a running app is then restarted on the new image.
+bundle_install() {
+  run docker compose run --rm --no-deps -T web bundle install </dev/null || return
+  run docker compose build web || return
+  if [ -n "$(docker compose ps --quiet --status running web)" ]; then
+    run docker compose up --detach --wait web
+  fi
+}
+
+# Interactive, so it keeps the keyboard attached (unlike run_in_web).
+# Uses the running app container if there is one, otherwise a temporary one.
+rails_console() {
+  local tty=()
+  [ -t 0 ] || tty=(-T) # no terminal (e.g. input piped in): don't ask Docker for one
+  echo "Type ${BOLD}exit${RESET} to go back to the menu."
+  if [ -n "$(docker compose ps --quiet --status running web)" ]; then
+    run docker compose exec "${tty[@]}" web bin/rails console
+  else
+    run docker compose run --rm "${tty[@]}" web bin/rails console
+  fi
+}
+
+# Follows the app's log until Ctrl+C. Not wrapped in run(): Ctrl+C is the normal
+# way to leave, so it shouldn't be reported as a failure.
+show_logs() {
+  if [ -z "$(docker compose ps --quiet --status running web)" ]; then
+    echo "${RED}The app is not running.${RESET} Start it with option 1 first."
+    return
+  fi
+  echo "Showing the app's log. Press ${BOLD}Ctrl+C${RESET} to go back to the menu."
+  echo "${BOLD}> docker compose logs --follow --tail 100 web${RESET}"
+  docker compose logs --follow --tail 100 web </dev/null
+  echo "Stopped showing logs."
+}
+
+if ! docker info >/dev/null 2>&1; then
+  echo "${RED}Docker is not running. Start Docker Desktop and try again.${RESET}"
+  exit 1
+fi
+
+# Ctrl+C stops the current action but keeps the menu open
+trap 'echo' INT
+
+while true; do
+  echo
+  echo "${BOLD}Library app — what do you want to do?${RESET}"
+  echo "  1) Run app"
+  echo "  2) Run migrations"
+  echo "  3) Run tests"
+  echo "  4) Stop application"
+  echo "  5) Bundle install (after changing the Gemfile)"
+  echo "  6) Rails console"
+  echo "  7) Show app logs"
+  echo "  0) Exit"
+
+  if ! read -rp "Choose a number: " choice; then
+    echo
+    exit 0 # end of input (Ctrl+D)
+  fi
+  echo
+
+  case "$choice" in
+    1) run_app ;;
+    2) run_migrations ;;
+    3) run_tests ;;
+    4) stop_app ;;
+    5) bundle_install ;;
+    6) rails_console ;;
+    7) show_logs ;;
+    0) echo "Bye!"; exit 0 ;;
+    *) echo "${RED}Unknown option: ${choice:-<empty>}. Choose 0–7.${RESET}" ;;
+  esac
+done
