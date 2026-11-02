@@ -1,0 +1,12 @@
+#!/bin/bash
+set -e
+
+# A server.pid left over from a previous container stops Rails from booting
+rm -f /rails/tmp/pids/server.pid
+
+# Create the database if needed and run any pending migrations
+if [ "$1" = "bin/rails" ] && [ "$2" = "server" ]; then
+  bin/rails db:prepare
+fi
+
+exec "$@"
