@@ -1,19 +1,17 @@
 class BorrowRecord < ApplicationRecord
   LOAN_PERIOD = 30.days
 
-  belongs_to :reader, foreign_key: :reader_card_number, primary_key: :library_card_number,
-                      inverse_of: :borrow_records
-  belongs_to :book, foreign_key: :book_serial_number, primary_key: :serial_number,
-                    inverse_of: :borrow_records
+  # Linked by id. The API shows the reader's card number and the book's serial number instead.
+  belongs_to :reader
+  belongs_to :book
 
   scope :not_returned, -> { where(return_date: nil) }
   scope :returned, -> { where.not(return_date: nil) }
 
-  validates :reader_card_number, presence: true
-  validates :book_serial_number, presence: true,
-                                 uniqueness: { conditions: -> { not_returned },
-                                               message: "is already borrowed and not returned yet" },
-                                 if: :not_returned?
+  # belongs_to already requires the reader and the book to exist ("must exist")
+  validates :book, uniqueness: { conditions: -> { not_returned },
+                                 message: "is already borrowed and not returned yet" },
+                   if: :not_returned?
   validates :borrowed_date, presence: true
   # On create, a missing due_date is filled in by set_due_date (which runs after validation)
   validates :due_date, presence: true, on: :update
@@ -26,12 +24,24 @@ class BorrowRecord < ApplicationRecord
 
   before_create :set_due_date
 
+  def reader_card_number
+    reader&.library_card_number
+  end
+
+  def book_serial_number
+    book&.serial_number
+  end
+
   def returned?
     return_date.present?
   end
 
   def not_returned?
     !returned?
+  end
+
+  def mark_returned!
+    update!(return_date: Date.current)
   end
 
   private

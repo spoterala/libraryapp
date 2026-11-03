@@ -116,12 +116,19 @@ RSpec.describe Reader, type: :model do
       expect(reader.errors[:base]).to include("Cannot delete record because dependent borrow records exist")
     end
 
-    it "updates the borrow records when the library card number changes" do
+    it "keeps its borrow records when the library card number changes (they link by id)" do
       record = create(:borrow_record, reader: reader, book: book)
 
       reader.update!(library_card_number: "555555")
 
-      expect(record.reload.reader_card_number).to eq("555555")
+      expect(record.reload.reader).to eq(reader)
+      expect(record.reader_card_number).to eq("555555")
+    end
+
+    it "is rejected by the database when deleting a reader who has borrow records" do
+      create(:borrow_record, reader: reader, book: book)
+
+      expect { reader.delete }.to raise_error(ActiveRecord::InvalidForeignKey)
     end
   end
 end

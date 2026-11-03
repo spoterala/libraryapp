@@ -1,6 +1,13 @@
 Rails.application.routes.draw do
-  # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
-
-  # Defines the root path route ("/")
-  # root "articles#index"
+  namespace :api do
+    namespace :v1 do
+      # Books are identified by their serial number, e.g. /api/v1/books/000123
+      resources :books, only: %i[index create destroy], param: :serial_number do
+        member do
+          post :borrow
+          post :return, action: :return_book
+        end
+      end
+    end
+  end
 end

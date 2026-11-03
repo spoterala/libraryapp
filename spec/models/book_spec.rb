@@ -74,19 +74,87 @@ RSpec.describe Book, type: :model do
       expect(book.borrow_records).to contain_exactly(record)
     end
 
-    it "prevents deleting a book that has borrow records" do
-      create(:borrow_record, reader: reader, book: book)
+    it "prevents deleting a book that is currently borrowed" do
+      record = create(:borrow_record, reader: reader, book: book)
 
       expect(book.destroy).to be(false)
-      expect(book.errors[:base]).to include("Cannot delete record because dependent borrow records exist")
+      expect(book.errors[:base]).to include("Cannot delete a book that is currently borrowed")
+      expect(BorrowRecord.exists?(record.id)).to be(true)
     end
 
-    it "updates the borrow records when the serial number changes" do
+    it "deletes a book whose loans were all returned, together with its borrow records" do
+      record = create(:borrow_record, :returned, reader: reader, book: book)
+
+      expect(book.destroy).to be_truthy
+      expect(Book.exists?(book.id)).to be(false)
+      expect(BorrowRecord.exists?(record.id)).to be(false)
+    end
+
+    it "deletes the borrow records at the database level too" do
+      record = create(:borrow_record, :returned, reader: reader, book: book)
+
+      book.delete # skips Rails callbacks, so only the foreign key's ON DELETE CASCADE runs
+
+      expect(BorrowRecord.exists?(record.id)).to be(false)
+    end
+
+    it "keeps its borrow records when the serial number changes (they link by id)" do
       record = create(:borrow_record, reader: reader, book: book)
 
       book.update!(serial_number: "555555")
 
-      expect(record.reload.book_serial_number).to eq("555555")
+      expect(record.reload.book).to eq(book)
+      expect(record.book_serial_number).to eq("555555")
+    end
+  end
+
+  describe "#current_borrow_record, #available? and #borrowed?" do
+    before { book.save! }
+
+    it "has no current borrow record and is available when never borrowed" do
+      expect(book.current_borrow_record).to be_nil
+      expect(book).to be_available
+      expect(book).not_to be_borrowed
+    end
+
+    it "is borrowed while a loan is not returned" do
+      record = create(:borrow_record, book: book)
+
+      expect(book.current_borrow_record).to eq(record)
+      expect(book).to be_borrowed
+      expect(book).not_to be_available
+    end
+
+    it "is available again after the loan is returned" do
+      create(:borrow_record, :returned, book: book)
+
+      expect(book.current_borrow_record).to be_nil
+      expect(book).to be_available
+    end
+  end
+
+  describe "#borrow_by" do
+    let(:reader) { create(:reader) }
+
+    before { book.save! }
+
+    it "creates a loan for the reader from today, due in 30 days" do
+      record = book.borrow_by(reader)
+
+      expect(record).to be_persisted
+      expect(record.reader).to eq(reader)
+      expect(record.borrowed_date).to eq(Date.current)
+      expect(record.due_date).to eq(Date.current + 30)
+      expect(book).to be_borrowed
+    end
+
+    it "returns an unsaved record with errors when the book is already borrowed" do
+      book.borrow_by(create(:reader))
+
+      record = book.borrow_by(reader)
+
+      expect(record).not_to be_persisted
+      expect(record.errors[:book]).to include("is already borrowed and not returned yet")
     end
   end
 end

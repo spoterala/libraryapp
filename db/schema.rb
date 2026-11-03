@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_02_152205) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_03_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -24,16 +24,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_02_152205) do
   end
 
   create_table "borrow_records", force: :cascade do |t|
-    t.string "reader_card_number", limit: 6, null: false
-    t.string "book_serial_number", limit: 6, null: false
     t.date "borrowed_date", null: false
     t.date "due_date", null: false
     t.date "return_date"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.index ["book_serial_number"], name: "index_borrow_records_on_book_serial_number"
-    t.index ["book_serial_number"], name: "index_borrow_records_on_currently_borrowed_book", unique: true, where: "(return_date IS NULL)"
-    t.index ["reader_card_number"], name: "index_borrow_records_on_reader_card_number"
+    t.bigint "reader_id", null: false
+    t.bigint "book_id", null: false
+    t.index ["book_id"], name: "index_borrow_records_on_book_id"
+    t.index ["book_id"], name: "index_borrow_records_on_currently_borrowed_book", unique: true, where: "(return_date IS NULL)"
+    t.index ["reader_id"], name: "index_borrow_records_on_reader_id"
     t.check_constraint "due_date >= borrowed_date", name: "borrow_records_due_date_not_before_borrowed_date"
     t.check_constraint "return_date IS NULL OR return_date >= borrowed_date", name: "borrow_records_return_date_not_before_borrowed_date"
   end
@@ -48,6 +48,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_02_152205) do
     t.index ["library_card_number"], name: "index_readers_on_library_card_number", unique: true
   end
 
-  add_foreign_key "borrow_records", "books", column: "book_serial_number", primary_key: "serial_number", on_update: :cascade
-  add_foreign_key "borrow_records", "readers", column: "reader_card_number", primary_key: "library_card_number", on_update: :cascade
+  add_foreign_key "borrow_records", "books", on_delete: :cascade
+  add_foreign_key "borrow_records", "readers"
 end

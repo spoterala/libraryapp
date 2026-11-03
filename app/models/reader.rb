@@ -1,7 +1,5 @@
 class Reader < ApplicationRecord
-  has_many :borrow_records, foreign_key: :reader_card_number, primary_key: :library_card_number,
-                            inverse_of: :reader,
-                            dependent: :restrict_with_error # keep the borrowing history
+  has_many :borrow_records, dependent: :restrict_with_error
 
   normalizes :email, with: ->(email) { email.strip.downcase }
 
