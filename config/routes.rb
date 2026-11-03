@@ -8,6 +8,9 @@ Rails.application.routes.draw do
           post :return, action: :return_book
         end
       end
+
+      # Readers are identified by their library card number, e.g. /api/v1/readers/100001
+      resources :readers, only: %i[index show create destroy], param: :library_card_number
     end
   end
 end
