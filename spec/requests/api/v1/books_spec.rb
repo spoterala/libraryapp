@@ -29,6 +29,56 @@ RSpec.describe "Books API", type: :request do
     end
   end
 
+  describe "GET /api/v1/books/:serial_number" do
+    let!(:book) { create(:book, serial_number: "000123", title: "North and South", author: "Elizabeth Gaskell") }
+
+    it "returns an available book with an empty history" do
+      get "/api/v1/books/000123"
+
+      expect(response).to have_http_status(:ok)
+      expect(json).to eq("serial_number" => "000123", "title" => "North and South", "author" => "Elizabeth Gaskell",
+                         "status" => "available", "due_date" => nil, "borrow_records" => [])
+    end
+
+    it "returns the full borrowing history, newest first, with the readers' details" do
+      first_reader = create(:reader, library_card_number: "000001", full_name: "Elizabeth Bennet",
+                                     email: "elizabeth.bennet@example.com")
+      second_reader = create(:reader, library_card_number: "000002")
+      create(:borrow_record, book: book, reader: first_reader,
+                             borrowed_date: Date.new(2026, 5, 4), return_date: Date.new(2026, 5, 25))
+      current = create(:borrow_record, book: book, reader: second_reader, borrowed_date: Date.current - 3)
+
+      get "/api/v1/books/000123"
+
+      expect(response).to have_http_status(:ok)
+      expect(json).to include("status" => "borrowed", "due_date" => current.due_date.iso8601)
+      expect(json["borrow_records"]).to eq([
+        { "borrowed_date" => (Date.current - 3).iso8601, "due_date" => current.due_date.iso8601,
+          "return_date" => nil,
+          "reader" => { "library_card_number" => "000002", "full_name" => second_reader.full_name,
+                        "email" => second_reader.email } },
+        { "borrowed_date" => "2026-05-04", "due_date" => "2026-06-03", "return_date" => "2026-05-25",
+          "reader" => { "library_card_number" => "000001", "full_name" => "Elizabeth Bennet",
+                        "email" => "elizabeth.bennet@example.com" } }
+      ])
+    end
+
+    it "doesn't include other books' loans" do
+      create(:borrow_record, book: create(:book))
+
+      get "/api/v1/books/000123"
+
+      expect(json["borrow_records"]).to eq([])
+    end
+
+    it "returns 404 for an unknown serial number" do
+      get "/api/v1/books/999999"
+
+      expect(response).to have_http_status(:not_found)
+      expect(json["error"]).to eq("Book not found")
+    end
+  end
+
   describe "POST /api/v1/books" do
     let(:params) { { book: { serial_number: "000123", title: "Emma", author: "Jane Austen" } } }
 
@@ -85,6 +135,7 @@ RSpec.describe "Books API", type: :request do
       expect(Book.exists?(book.id)).to be(false)
     end
 
+      # The book with its whole borrowing history, newest loan first
     it "refuses to delete a book that is currently borrowed" do
       create(:borrow_record, book: book)
 

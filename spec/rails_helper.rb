@@ -45,6 +45,12 @@ RSpec.configure do |config|
   # instead of true.
   config.use_transactional_fixtures = true
 
+  # Start from an empty test database. Each spec's changes are rolled back, but data added
+  # outside the specs stays (e.g. bin/ci's "Tests: Seeds" step seeds the test database).
+  config.before(:suite) do
+    ActiveRecord::Tasks::DatabaseTasks.truncate_all
+  end
+
   # You can uncomment this line to turn off ActiveRecord support entirely.
   # config.use_active_record = false
 

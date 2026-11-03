@@ -1,12 +1,18 @@
 module Api
   module V1
     class BooksController < ApplicationController
-      before_action :set_book, only: %i[destroy borrow return_book]
+      before_action :set_book, only: %i[show destroy borrow return_book]
 
       # GET /api/v1/books
       def index
         books = Book.includes(:current_borrow_record).order(:serial_number)
         render json: books.map { |book| book_json(book) }
+      end
+
+      # GET /api/v1/books/:serial_number
+      def show
+        history = @book.borrow_records.includes(:reader).order(borrowed_date: :desc, id: :desc)
+        render json: book_json(@book).merge(borrow_records: history.map { |record| history_json(record) })
       end
 
       # POST /api/v1/books
@@ -73,6 +79,16 @@ module Api
           author: book.author,
           status: loan ? "borrowed" : "available",
           due_date: loan&.due_date
+        }
+      end
+
+      # One loan in a book's history, with the reader's details
+      def history_json(record)
+        {
+          borrowed_date: record.borrowed_date,
+          due_date: record.due_date,
+          return_date: record.return_date,
+          reader: record.reader.as_json(only: %i[library_card_number full_name email])
         }
       end
 
