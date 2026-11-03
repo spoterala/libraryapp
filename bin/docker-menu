@@ -44,6 +44,25 @@ run_tests() {
   run_in_web bundle exec rspec "${color[@]}"
 }
 
+# Adds the example books, readers and borrow records from db/seeds.rb.
+# Safe to run again: records that already exist are left as they are.
+load_seeds() {
+  run_in_web bin/rails db:seed
+}
+
+# Empties every table, then loads the seed data. Asks first, since it deletes data.
+reset_data() {
+  echo "${RED}This deletes ALL books, readers and borrow records${RESET} in the development"
+  echo "database, then loads the seed data again."
+  local answer
+  read -rp "Are you sure? Type y to continue [y/N]: " answer || { echo; return; }
+  if [ "$answer" = "y" ] || [ "$answer" = "Y" ]; then
+    run_in_web bin/rails db:seed:replant
+  else
+    echo "Cancelled. Nothing was changed."
+  fi
+}
+
 stop_app() {
   run docker compose down
 }
@@ -102,6 +121,8 @@ while true; do
   echo "  5) Bundle install (after changing the Gemfile)"
   echo "  6) Rails console"
   echo "  7) Show app logs"
+  echo "  8) Load seed data (example books, readers, loans)"
+  echo "  9) Reset data (delete everything, then load seed data)"
   echo "  0) Exit"
 
   if ! read -rp "Choose a number: " choice; then
@@ -118,7 +139,9 @@ while true; do
     5) bundle_install ;;
     6) rails_console ;;
     7) show_logs ;;
+    8) load_seeds ;;
+    9) reset_data ;;
     0) echo "Bye!"; exit 0 ;;
-    *) echo "${RED}Unknown option: ${choice:-<empty>}. Choose 0–7.${RESET}" ;;
+    *) echo "${RED}Unknown option: ${choice:-<empty>}. Choose 0–9.${RESET}" ;;
   esac
 done

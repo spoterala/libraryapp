@@ -39,3 +39,8 @@ group :development, :test do
   # Test data factories; in development too so generators create factory files [https://github.com/thoughtbot/factory_bot_rails]
   gem "factory_bot_rails", "~> 6.5"
 end
+
+group :test do
+  # Test coverage report; the suite fails if coverage drops below 100% [https://github.com/simplecov-ruby/simplecov]
+  gem "simplecov", "~> 0.22", require: false
+end

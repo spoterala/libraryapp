@@ -152,6 +152,33 @@ RSpec.describe "Books API", type: :request do
       expect(json["errors"]).to eq("reader_card_number" => [ "doesn't match any reader" ])
     end
 
+    context "when another request borrows the book at the same moment" do
+      # The other loan appears after this request checked that the book is available
+      before do
+        create(:borrow_record, book: book)
+        allow(Book).to receive(:find_by!).with(serial_number: "000123").and_return(book)
+      end
+
+      it "returns 422 when the model validation catches it" do
+        allow(book).to receive(:borrowed?).and_return(false)
+
+        post "/api/v1/books/000123/borrow", params: { reader_card_number: "000042" }, as: :json
+
+        expect(response).to have_http_status(:unprocessable_content)
+        expect(json["errors"]).to eq("book" => [ "is already borrowed and not returned yet" ])
+      end
+
+      it "returns 409 when the database unique index catches it" do
+        allow(book).to receive(:borrowed?).and_return(false)
+        allow(book).to receive(:borrow_by).and_raise(ActiveRecord::RecordNotUnique)
+
+        post "/api/v1/books/000123/borrow", params: { reader_card_number: "000042" }, as: :json
+
+        expect(response).to have_http_status(:conflict)
+        expect(json["error"]).to eq("Conflicts with an existing record")
+      end
+    end
+
     it "returns 404 for an unknown serial number" do
       post "/api/v1/books/999999/borrow", params: { reader_card_number: "000042" }, as: :json
 

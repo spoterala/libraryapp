@@ -25,6 +25,15 @@ RSpec.describe BorrowRecord, type: :model do
     end
   end
 
+  describe "#reader_card_number and #book_serial_number" do
+    it "are empty when there is no reader or book" do
+      record = described_class.new
+
+      expect(record.reader_card_number).to be_nil
+      expect(record.book_serial_number).to be_nil
+    end
+  end
+
   describe "#reader" do
     it "is required" do
       record.reader = nil
