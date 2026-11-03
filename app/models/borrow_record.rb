@@ -1,5 +1,6 @@
 class BorrowRecord < ApplicationRecord
   LOAN_PERIOD = 30.days
+  DUE_SOON_REMINDER_DAYS = 3
 
   # Linked by id. The API shows the reader's card number and the book's serial number instead.
   belongs_to :reader
@@ -7,6 +8,15 @@ class BorrowRecord < ApplicationRecord
 
   scope :not_returned, -> { where(return_date: nil) }
   scope :returned, -> { where.not(return_date: nil) }
+
+  scope :needing_due_soon_reminder, lambda {
+    today = Date.current
+    not_returned.where(due_soon_reminder_sent_at: nil, due_date: (today + 1)..(today + DUE_SOON_REMINDER_DAYS))
+  }
+
+  scope :needing_due_today_reminder, lambda {
+    not_returned.where(due_today_reminder_sent_at: nil, due_date: Date.current)
+  }
 
   # belongs_to already requires the reader and the book to exist ("must exist")
   validates :book, uniqueness: { conditions: -> { not_returned },

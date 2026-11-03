@@ -16,20 +16,36 @@ services:
     build: .
     ports:
       - "3000:3000"
-    environment:
+    environment: &app_environment
       # Read by config/database.yml
       DB_HOST: db
       DB_USERNAME: postgres
       DB_PASSWORD: postgres
       RAILS_ENV: development
-    volumes:
+    volumes: &app_volumes
       # Mount the code so changes show up without rebuilding the image
       - .:/rails
     depends_on:
       db:
         condition: service_healthy
+    # Healthy once the app answers, i.e. after the database is created and migrated
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:3000/up || exit 1"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
     stdin_open: true
     tty: true
+
+  # Solid Queue worker: runs background jobs, e.g. the daily return reminders (config/recurring.yml)
+  jobs:
+    build: .
+    command: bin/jobs
+    environment: *app_environment
+    volumes: *app_volumes
+    depends_on:
+      web:
+        condition: service_healthy # waits until web has prepared the database
 
 volumes:
   postgres_data:

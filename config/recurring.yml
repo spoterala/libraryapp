@@ -1,0 +1,16 @@
+# Recurring jobs, run by the Solid Queue worker (bin/jobs, the `jobs` service in Docker).
+
+default: &default
+  # Return reminders: 3 days before the due date, and on the due date
+  send_return_reminders:
+    class: SendReturnRemindersJob
+    schedule: every day at 8am Europe/Warsaw
+
+development:
+  <<: *default
+
+production:
+  <<: *default
+  clear_solid_queue_finished_jobs:
+    command: "SolidQueue::Job.clear_finished_in_batches(sleep_between_batches: 0.3)"
+    schedule: every hour at minute 12

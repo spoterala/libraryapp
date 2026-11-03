@@ -1,4 +1,7 @@
 Rails.application.routes.draw do
+  # Health check: 200 when the app boots without errors (used by Docker's healthcheck)
+  get "up" => "rails/health#show", as: :rails_health_check
+
   namespace :api do
     namespace :v1 do
       # Books are identified by their serial number, e.g. /api/v1/books/000123

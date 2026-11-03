@@ -1,0 +1,12 @@
+<p>Hello <%= @reader.full_name %>,</p>
+
+<p>This is a reminder that the book you borrowed is due in <%= pluralize(@days_left, "day") %>:</p>
+
+<p>
+  <strong><%= @book.title %></strong> by <%= @book.author %><br>
+  Due date: <%= l(@due_date, format: :long) %>
+</p>
+
+<p>Please return it by then.</p>
+
+<p>Your Library</p>

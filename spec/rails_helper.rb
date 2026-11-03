@@ -45,6 +45,9 @@ RSpec.configure do |config|
   # instead of true.
   config.use_transactional_fixtures = true
 
+  # travel_to / freeze_time, for specs that depend on today's date
+  config.include ActiveSupport::Testing::TimeHelpers
+
   # Start from an empty test database. Each spec's changes are rolled back, but data added
   # outside the specs stays (e.g. bin/ci's "Tests: Seeds" step seeds the test database).
   config.before(:suite) do

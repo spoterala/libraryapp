@@ -2,7 +2,7 @@
 # The HTML report is written to coverage/index.html.
 SimpleCov.start "rails" do # covers app/ and lib/, including files no spec loads
   # Rails boilerplate that this API-only app never uses
-  add_filter %w[app/channels app/jobs/application_job.rb app/mailers/application_mailer.rb]
+  add_filter "app/channels"
 
   enable_coverage :branch # also check both sides of every if/unless/&&/||
 

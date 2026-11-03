@@ -24,6 +24,13 @@ module Libraryapp
     # Initialize configuration defaults for originally generated Rails version.
     config.load_defaults 8.1
 
+    # Dates like "today" and "due in 3 days" follow the library's local time
+    config.time_zone = "Europe/Warsaw"
+
+    # Background jobs (e.g. reminder emails) run with Solid Queue, stored in the main database.
+    # The worker runs as the `jobs` service in docker-compose.yml (bin/jobs).
+    config.active_job.queue_adapter = :solid_queue
+
     # Please, add to the `ignore` list any other `lib` subdirectories that do
     # not contain `.rb` files, or that should not be reloaded or eager loaded.
     # Common ones are `templates`, `generators`, or `middleware`, for example.

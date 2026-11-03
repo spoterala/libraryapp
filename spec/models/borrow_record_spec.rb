@@ -280,4 +280,76 @@ RSpec.describe BorrowRecord, type: :model do
       expect(record).to be_returned
     end
   end
+
+  describe "reminder scopes" do
+    # Wednesday 2026-11-11, 08:00 in the app's time zone (Europe/Warsaw)
+    around { |example| travel_to(Time.zone.local(2026, 11, 11, 8)) { example.run } }
+
+    def loan_due_in(days, **attributes)
+      due_date = Date.current + days
+      create(:borrow_record, borrowed_date: due_date - 30, due_date: due_date, **attributes)
+    end
+
+    describe ".needing_due_soon_reminder" do
+      it "includes open loans due in 3 days" do
+        record = loan_due_in(3)
+
+        expect(described_class.needing_due_soon_reminder).to contain_exactly(record)
+      end
+
+      it "catches up on loans due in 1 or 2 days whose reminder was missed" do
+        records = [ loan_due_in(1), loan_due_in(2) ]
+
+        expect(described_class.needing_due_soon_reminder).to match_array(records)
+      end
+
+      it "skips loans due today, later than in 3 days, or overdue" do
+        loan_due_in(0)
+        loan_due_in(4)
+        loan_due_in(-1)
+
+        expect(described_class.needing_due_soon_reminder).to be_empty
+      end
+
+      it "skips returned loans and loans already reminded" do
+        loan_due_in(3, return_date: Date.current)
+        loan_due_in(3, due_soon_reminder_sent_at: 1.day.ago)
+
+        expect(described_class.needing_due_soon_reminder).to be_empty
+      end
+    end
+
+    describe ".needing_due_today_reminder" do
+      it "includes open loans due today" do
+        record = loan_due_in(0)
+
+        expect(described_class.needing_due_today_reminder).to contain_exactly(record)
+      end
+
+      it "skips loans due on other days, so it is never sent late" do
+        loan_due_in(1)
+        loan_due_in(-1)
+
+        expect(described_class.needing_due_today_reminder).to be_empty
+      end
+
+      it "skips returned loans and loans already reminded" do
+        loan_due_in(0, return_date: Date.current)
+        loan_due_in(0, due_today_reminder_sent_at: 1.hour.ago)
+
+        expect(described_class.needing_due_today_reminder).to be_empty
+      end
+    end
+  end
+
+  describe "reminder scopes and the time zone" do
+    it "use the Europe/Warsaw date, not UTC" do
+      # 23:30 UTC on 2026-11-11 is already 2026-11-12 in Warsaw
+      travel_to(Time.utc(2026, 11, 11, 23, 30)) do
+        record = create(:borrow_record, borrowed_date: Date.new(2026, 10, 13), due_date: Date.new(2026, 11, 12))
+
+        expect(described_class.needing_due_today_reminder).to contain_exactly(record)
+      end
+    end
+  end
 end

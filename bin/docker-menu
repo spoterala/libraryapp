@@ -63,6 +63,17 @@ reset_data() {
   fi
 }
 
+# Runs the reminder job now instead of waiting for 08:00. The emails are delivered by the
+# jobs worker, which runs with the app (option 1).
+send_reminders() {
+  run_in_web bin/rails runner 'SendReturnRemindersJob.perform_now' || return
+  if [ -n "$(docker compose ps --quiet --status running jobs)" ]; then
+    echo "Reminders queued. See them in tmp/mails/ or in the app logs (option 7)."
+  else
+    echo "Reminders queued. They will be sent when the app is running (option 1)."
+  fi
+}
+
 stop_app() {
   run docker compose down
 }
@@ -97,9 +108,9 @@ show_logs() {
     echo "${RED}The app is not running.${RESET} Start it with option 1 first."
     return
   fi
-  echo "Showing the app's log. Press ${BOLD}Ctrl+C${RESET} to go back to the menu."
-  echo "${BOLD}> docker compose logs --follow --tail 100 web${RESET}"
-  docker compose logs --follow --tail 100 web </dev/null
+  echo "Showing the logs of the app and the jobs worker. Press ${BOLD}Ctrl+C${RESET} to go back to the menu."
+  echo "${BOLD}> docker compose logs --follow --tail 100 web jobs${RESET}"
+  docker compose logs --follow --tail 100 web jobs </dev/null
   echo "Stopped showing logs."
 }
 
@@ -123,6 +134,7 @@ while true; do
   echo "  7) Show app logs"
   echo "  8) Load seed data (example books, readers, loans)"
   echo "  9) Reset data (delete everything, then load seed data)"
+  echo " 10) Send return reminders now"
   echo "  0) Exit"
 
   if ! read -rp "Choose a number: " choice; then
@@ -141,7 +153,8 @@ while true; do
     7) show_logs ;;
     8) load_seeds ;;
     9) reset_data ;;
+    10) send_reminders ;;
     0) echo "Bye!"; exit 0 ;;
-    *) echo "${RED}Unknown option: ${choice:-<empty>}. Choose 0–9.${RESET}" ;;
+    *) echo "${RED}Unknown option: ${choice:-<empty>}. Choose 0–10.${RESET}" ;;
   esac
 done
