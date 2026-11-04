@@ -200,7 +200,7 @@ RSpec.describe "Books API", type: :request do
       post "/api/v1/books/000123/borrow", params: {}, as: :json
 
       expect(response).to have_http_status(:unprocessable_content)
-      expect(json["errors"]).to eq("reader_card_number" => [ "doesn't match any reader" ])
+      expect(json["errors"]).to eq("reader_card_number" => [ "can't be blank" ])
     end
 
     context "when another request borrows the book at the same moment" do

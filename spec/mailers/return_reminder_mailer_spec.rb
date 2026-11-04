@@ -39,6 +39,19 @@ RSpec.describe ReturnReminderMailer, type: :mailer do
       expect(mail.subject).to eq('Reminder: "Pride and Prejudice" is due in 1 day')
       expect(mail.text_part.body.to_s).to include("Due date: November 11, 2026")
     end
+
+    # The email is built when it is delivered, which can be after the job queued it
+    it "is not sent if the book was returned before the email went out" do
+      record = loan_due_on(Date.new(2026, 11, 13))
+      record.mark_returned!
+
+      expect(described_class.due_soon(record).message).to be_a(ActionMailer::Base::NullMail)
+    end
+
+    it "is not sent once the due date has come (the due-today email covers it)" do
+      expect(described_class.due_soon(loan_due_on(Date.new(2026, 11, 10))).message)
+        .to be_a(ActionMailer::Base::NullMail)
+    end
   end
 
   it "writes dates without a leading zero on the day (config/locales/en.yml)" do
@@ -61,6 +74,18 @@ RSpec.describe ReturnReminderMailer, type: :mailer do
       bodies(mail).each do |body|
         expect(body).to include("Elizabeth Bennet", "Pride and Prejudice", "Jane Austen", "November 10, 2026")
       end
+    end
+
+    it "is not sent if the book was returned before the email went out" do
+      record = loan_due_on(Date.new(2026, 11, 10))
+      record.mark_returned!
+
+      expect(described_class.due_today(record).message).to be_a(ActionMailer::Base::NullMail)
+    end
+
+    it "is not sent after the due date (it would say \"due today\" on the wrong day)" do
+      expect(described_class.due_today(loan_due_on(Date.new(2026, 11, 9))).message)
+        .to be_a(ActionMailer::Base::NullMail)
     end
   end
 end

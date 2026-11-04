@@ -37,11 +37,11 @@ module Api
 
       # POST /api/v1/books/:serial_number/borrow
       def borrow
-        reader = Reader.find_by(library_card_number: params[:reader_card_number])
-        unless reader
-          return render json: { errors: { reader_card_number: [ "doesn't match any reader" ] } },
-                        status: :unprocessable_content
-        end
+        card_number = params[:reader_card_number]
+        return render_reader_card_number_error("can't be blank") if card_number.blank?
+
+        reader = Reader.find_by(library_card_number: card_number)
+        return render_reader_card_number_error("doesn't match any reader") unless reader
         return render_error("Book is already borrowed", :conflict) if @book.borrowed?
 
         record = @book.borrow_by(reader)
@@ -65,6 +65,10 @@ module Api
 
       def set_book
         @book = Book.find_by!(serial_number: params[:serial_number])
+      end
+
+      def render_reader_card_number_error(message)
+        render json: { errors: { reader_card_number: [ message ] } }, status: :unprocessable_content
       end
 
       def book_params

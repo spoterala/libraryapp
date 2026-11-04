@@ -7,3 +7,4 @@ storage/*
 !tmp/.keep
 !storage/.keep
 .env*
+coverage/

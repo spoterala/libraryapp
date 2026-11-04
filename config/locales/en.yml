@@ -30,7 +30,6 @@
 # available at https://guides.rubyonrails.org/i18n.html.
 
 en:
-  hello: "Hello world"
   date:
     formats:
       # Used in emails, e.g. "November 6, 2026" (the Rails default is "November 06, 2026")

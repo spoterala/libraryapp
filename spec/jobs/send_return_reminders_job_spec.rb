@@ -81,4 +81,14 @@ RSpec.describe SendReturnRemindersJob, type: :job do
 
     expect(ActionMailer::Base.deliveries.map(&:subject)).to contain_exactly(match(/is due in 3 days/))
   end
+
+  it "doesn't deliver a queued email if the book is returned before it goes out" do
+    record = loan_due_in(3)
+    described_class.perform_now
+    record.mark_returned!
+
+    perform_enqueued_jobs
+
+    expect(ActionMailer::Base.deliveries).to be_empty
+  end
 end

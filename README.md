@@ -120,7 +120,35 @@ Reminders are sent every day at **08:00 Europe/Warsaw time** (`config/recurring.
 - **Due soon**: 3 days before the due date (sent late, with 2 or 1 days left, if that day was missed)
 - **Due today**: on the due date
 
-Each reminder is sent only once per loan.
+Each reminder is sent only once per loan. The email is built when the worker delivers it, so
+nothing is sent if the book was returned in the meantime, or if the email would arrive too late
+(a "due soon" email on or after the due date, a "due today" email after it).
+
+### Testing the reminders
+
+On the seed data the job sends nothing, because no current loan is due within 3 days. To see
+both emails:
+
+1. Start the app (menu option **1**). The `jobs` worker must be running, because it delivers the emails.
+2. Open the Rails console (option **6**) and move two due dates:
+
+   ```ruby
+   # "Due soon" email: due in 3 days (John Thornton, Pride and Prejudice)
+   Book.find_by(serial_number: "000001").current_borrow_record
+       .update!(due_date: Date.current + 3, due_soon_reminder_sent_at: nil)
+
+   # "Due today" email: due today (Owen Kiskadon, The Banished of Muirwood)
+   Book.find_by(serial_number: "000005").current_borrow_record
+       .update!(due_date: Date.current, due_today_reminder_sent_at: nil)
+   ```
+
+   Type `exit` to go back to the menu.
+3. Choose **10) Send return reminders now**.
+4. Check `tmp/mails/john.thornton@example.com` and `tmp/mails/owen.kiskadon@example.com`, or the
+   logs (option **7**).
+5. Run option **10** again: no new emails appear, because each reminder is sent only once.
+   To send one again, set its `..._reminder_sent_at` back to `nil` in the console.
+6. Reset the data with option **9** when you're done.
 
 ---
 
@@ -346,7 +374,7 @@ Neither can be set by the client.
 | `due_date` | Today + 30 days |
 | `return_date` | `null` |
 
-**Errors:** `404` book not found, `422` no reader with that card number, `409` book is already borrowed
+**Errors:** `404` book not found, `422` card number missing or no reader with that card number, `409` book is already borrowed
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/books/000002/borrow \
@@ -364,9 +392,10 @@ curl -X POST http://localhost:3000/api/v1/books/000002/borrow \
 }
 ```
 
-Unknown reader (`422`):
+Missing or unknown reader (`422`):
 
 ```json
+{ "errors": { "reader_card_number": ["can't be blank"] } }
 { "errors": { "reader_card_number": ["doesn't match any reader"] } }
 ```
 
