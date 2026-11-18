@@ -2,5 +2,10 @@
 class BookSummaryResource
   include Alba::Resource
 
-  attributes :serial_number, :title, :author
+  attributes :serial_number, :title, :author_id
+
+  # The author's name, as a string
+  attribute :author do |book|
+    book.author.name
+  end
 end

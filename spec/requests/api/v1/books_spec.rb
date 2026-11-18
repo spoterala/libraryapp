@@ -12,7 +12,8 @@ RSpec.describe "Books API", type: :request do
     end
 
     it "lists books ordered by serial number, with their availability" do
-      available = create(:book, serial_number: "000002", title: "Pride and Prejudice", author: "Jane Austen")
+      austen = create(:author, name: "Jane Austen")
+      available = create(:book, serial_number: "000002", title: "Pride and Prejudice", author: austen)
       borrowed = create(:book, serial_number: "000001")
       returned = create(:book, serial_number: "000003")
       loan = create(:borrow_record, book: borrowed)
@@ -24,19 +25,22 @@ RSpec.describe "Books API", type: :request do
       expect(json.map { it["serial_number"] }).to eq(%w[000001 000002 000003])
       expect(json[0]).to include("status" => "borrowed", "due_date" => loan.due_date.iso8601)
       expect(json[1]).to eq("serial_number" => available.serial_number, "title" => "Pride and Prejudice",
-                            "author" => "Jane Austen", "status" => "available", "due_date" => nil)
+                            "author_id" => austen.id, "author" => "Jane Austen",
+                            "status" => "available", "due_date" => nil)
       expect(json[2]).to include("status" => "available", "due_date" => nil)
     end
   end
 
   describe "GET /api/v1/books/:serial_number" do
-    let!(:book) { create(:book, serial_number: "000123", title: "North and South", author: "Elizabeth Gaskell") }
+    let!(:book) { create(:book, serial_number: "000123", title: "North and South",
+                                 author: create(:author, name: "Elizabeth Gaskell")) }
 
     it "returns an available book with an empty history" do
       get "/api/v1/books/000123"
 
       expect(response).to have_http_status(:ok)
-      expect(json).to eq("serial_number" => "000123", "title" => "North and South", "author" => "Elizabeth Gaskell",
+      expect(json).to eq("serial_number" => "000123", "title" => "North and South",
+                         "author_id" => book.author_id, "author" => "Elizabeth Gaskell",
                          "status" => "available", "due_date" => nil, "borrow_records" => [])
     end
 
@@ -80,14 +84,17 @@ RSpec.describe "Books API", type: :request do
   end
 
   describe "POST /api/v1/books" do
-    let(:params) { { book: { serial_number: "000123", title: "Emma", author: "Jane Austen" } } }
+    let!(:author) { create(:author, name: "Jane Austen") }
+    let(:params) { { book: { serial_number: "000123", title: "Emma", author_id: author.id } } }
 
     it "creates a book" do
       expect { post "/api/v1/books", params: params, as: :json }.to change(Book, :count).by(1)
 
       expect(response).to have_http_status(:created)
-      expect(json).to eq("serial_number" => "000123", "title" => "Emma", "author" => "Jane Austen",
+      expect(json).to eq("serial_number" => "000123", "title" => "Emma",
+                         "author_id" => author.id, "author" => "Jane Austen",
                          "status" => "available", "due_date" => nil)
+      expect(Book.last.author).to eq(author)
     end
 
     it "returns validation errors for invalid data" do
@@ -97,7 +104,7 @@ RSpec.describe "Books API", type: :request do
       expect(json.dig("error", "message")).to eq("Validation failed")
       expect(json.dig("error", "details")).to include("serial_number" => [ "must be exactly six digits" ],
                                         "title" => [ "can't be blank" ],
-                                        "author" => [ "can't be blank" ])
+                                        "author_id" => [ "can't be blank" ])
     end
 
     it "rejects a duplicate serial number" do
@@ -109,24 +116,42 @@ RSpec.describe "Books API", type: :request do
       expect(json.dig("error", "details", "serial_number")).to include("has already been taken")
     end
 
-    it "rejects a title or author that is too long" do
-      post "/api/v1/books", params: { book: params[:book].merge(title: "a" * 256, author: "a" * 256) }, as: :json
+    it "refuses an author id that doesn't exist" do
+      expect do
+        post "/api/v1/books", params: { book: params[:book].merge(author_id: author.id + 1) }, as: :json
+      end.not_to change(Book, :count)
 
       expect(response).to have_http_status(:unprocessable_content)
-      expect(json.dig("error", "details")).to eq("title" => [ "is too long (maximum is 255 characters)" ],
-                                                 "author" => [ "is too long (maximum is 255 characters)" ])
+      expect(json.dig("error", "details")).to eq("author_id" => [ "doesn't match any author" ])
+    end
+
+    it "accepts the author id only as a JSON integer" do
+      [ author.id.to_s, author.id.to_f, [ author.id ], { "id" => author.id } ].each do |author_id|
+        expect do
+          post "/api/v1/books", params: { book: params[:book].merge(author_id: author_id) }, as: :json
+        end.not_to change(Book, :count)
+
+        expect(response).to have_http_status(:unprocessable_content)
+        expect(json.dig("error", "details")).to eq("author_id" => [ "must be an integer" ])
+      end
+    end
+
+    it "rejects a title that is too long" do
+      post "/api/v1/books", params: { book: params[:book].merge(title: "a" * 256) }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(json.dig("error", "details")).to eq("title" => [ "is too long (maximum is 255 characters)" ])
     end
 
     it "rejects values that are not strings instead of converting or dropping them" do
       expect do
         post "/api/v1/books", params: { book: { serial_number: 123_456, title: [ "Emma" ],
-                                                author: { "name" => "Jane Austen" } } }, as: :json
+                                                author_id: author.id } }, as: :json
       end.not_to change(Book, :count)
 
       expect(response).to have_http_status(:unprocessable_content)
       expect(json.dig("error", "details")).to eq("serial_number" => [ "must be a string" ],
-                                                 "title" => [ "must be a string" ],
-                                                 "author" => [ "must be a string" ])
+                                                 "title" => [ "must be a string" ])
     end
 
     it "returns 400 for a request body that is not valid JSON" do
@@ -183,8 +208,8 @@ RSpec.describe "Books API", type: :request do
     it "doesn't let a new book reuse a deleted book's serial number" do
       delete "/api/v1/books/000123"
 
-      post "/api/v1/books", params: { book: { serial_number: "000123", title: "Emma", author: "Jane Austen" } },
-                            as: :json
+      post "/api/v1/books", params: { book: { serial_number: "000123", title: "Emma",
+                                              author_id: book.author_id } }, as: :json
 
       expect(response).to have_http_status(:unprocessable_content)
       expect(json.dig("error", "details", "serial_number")).to eq([ "has already been taken" ])
@@ -335,7 +360,7 @@ RSpec.describe "Books API", type: :request do
 
   describe "unknown paths" do
     it "returns 404 in the API's error format" do
-      get "/api/v1/authors"
+      get "/api/v1/publishers"
 
       expect(response).to have_http_status(:not_found)
       expect(json).to eq("error" => { "message" => "Not found" })

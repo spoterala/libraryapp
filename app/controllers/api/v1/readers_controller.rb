@@ -1,8 +1,6 @@
 module Api
   module V1
     class ReadersController < ApplicationController
-      READER_ATTRIBUTES = %i[library_card_number full_name email].freeze
-
       before_action :set_reader, only: %i[show destroy]
 
       # GET /api/v1/readers
@@ -45,9 +43,7 @@ module Api
       end
 
       def reader_params
-        permitted = params.expect(reader: READER_ATTRIBUTES)
-        require_string_values!(params[:reader], READER_ATTRIBUTES)
-        permitted
+        expect_typed_params(:reader, library_card_number: String, full_name: String, email: String)
       end
     end
   end

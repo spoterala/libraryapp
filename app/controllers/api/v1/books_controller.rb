@@ -1,13 +1,11 @@
 module Api
   module V1
     class BooksController < ApplicationController
-      BOOK_ATTRIBUTES = %i[serial_number title author].freeze
-
       before_action :set_book, only: %i[show destroy borrow return_book]
 
       # GET /api/v1/books
       def index
-        books = Book.kept.includes(:current_borrow_record).order(:serial_number)
+        books = Book.kept.includes(:author, :current_borrow_record).order(:serial_number)
         render json: BookResource.new(books)
       end
 
@@ -56,9 +54,7 @@ module Api
       end
 
       def book_params
-        permitted = params.expect(book: BOOK_ATTRIBUTES)
-        require_string_values!(params[:book], BOOK_ATTRIBUTES)
-        permitted
+        expect_typed_params(:book, serial_number: String, title: String, author_id: Integer)
       end
     end
   end

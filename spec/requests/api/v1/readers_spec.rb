@@ -55,7 +55,8 @@ RSpec.describe "Readers API", type: :request do
     end
 
     it "returns the full borrowing history, newest first, with the books' details" do
-      old_book = create(:book, serial_number: "000001", title: "Pride and Prejudice", author: "Jane Austen")
+      old_book = create(:book, serial_number: "000001", title: "Pride and Prejudice",
+                                  author: create(:author, name: "Jane Austen"))
       new_book = create(:book, serial_number: "000002")
       create(:borrow_record, reader: reader, book: old_book,
                              borrowed_date: Date.new(2026, 5, 4), return_date: Date.new(2026, 5, 25))
@@ -67,9 +68,11 @@ RSpec.describe "Readers API", type: :request do
       expect(json["borrow_records"]).to eq([
         { "borrowed_date" => (Date.current - 3).iso8601, "due_date" => current.due_date.iso8601,
           "return_date" => nil,
-          "book" => { "serial_number" => "000002", "title" => new_book.title, "author" => new_book.author } },
+          "book" => { "serial_number" => "000002", "title" => new_book.title,
+                      "author_id" => new_book.author_id, "author" => new_book.author.name } },
         { "borrowed_date" => "2026-05-04", "due_date" => "2026-06-03", "return_date" => "2026-05-25",
-          "book" => { "serial_number" => "000001", "title" => "Pride and Prejudice", "author" => "Jane Austen" } }
+          "book" => { "serial_number" => "000001", "title" => "Pride and Prejudice",
+                      "author_id" => old_book.author_id, "author" => "Jane Austen" } }
       ])
     end
 
@@ -152,6 +155,12 @@ RSpec.describe "Readers API", type: :request do
 
       expect(response).to have_http_status(:conflict)
       expect(json).to eq("error" => { "message" => "Conflicts with an existing record" })
+    end
+
+    it "returns 400 when the reader parameters are not an object" do
+      post "/api/v1/readers", params: { reader: "Elizabeth Bennet" }, as: :json
+
+      expect(response).to have_http_status(:bad_request)
     end
 
     it "returns 400 when the reader parameters are missing" do

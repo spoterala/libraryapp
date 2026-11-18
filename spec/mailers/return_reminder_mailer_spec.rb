@@ -4,7 +4,7 @@ RSpec.describe ReturnReminderMailer, type: :mailer do
   around { |example| travel_to(Time.zone.local(2026, 11, 10, 8)) { example.run } }
 
   let(:reader) { create(:reader, full_name: "Elizabeth Bennet", email: "elizabeth.bennet@example.com") }
-  let(:book) { create(:book, title: "Pride and Prejudice", author: "Jane Austen") }
+  let(:book) { create(:book, title: "Pride and Prejudice", author: create(:author, name: "Jane Austen")) }
 
   def loan_due_on(due_date)
     create(:borrow_record, reader: reader, book: book, borrowed_date: due_date - 30, due_date: due_date)

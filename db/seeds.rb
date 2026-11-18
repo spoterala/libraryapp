@@ -1,3 +1,7 @@
+authors = [ "Jane Austen", "Elizabeth Gaskell", "Jeff Wheeler" ].index_with do |name|
+  Author.find_or_create_by!(name: name)
+end
+
 books = [
   { serial_number: "000001", title: "Pride and Prejudice", author: "Jane Austen" },
   { serial_number: "000002", title: "Emma", author: "Jane Austen" },
@@ -6,7 +10,7 @@ books = [
   { serial_number: "000005", title: "The Banished of Muirwood", author: "Jeff Wheeler" }
 ].to_h do |attributes|
   book = Book.find_or_create_by!(serial_number: attributes[:serial_number]) do |new_book|
-    new_book.assign_attributes(attributes)
+    new_book.assign_attributes(attributes.merge(author: authors.fetch(attributes[:author])))
   end
   [ attributes[:title], book ]
 end
@@ -58,5 +62,5 @@ current_loans.each do |loan|
                               borrowed_date: Date.current - loan[:days_ago])
 end
 
-puts "Seeded: #{Book.count} books, #{Reader.count} readers, #{BorrowRecord.count} borrow records " \
+puts "Seeded: #{Author.count} authors, #{Book.count} books, #{Reader.count} readers, #{BorrowRecord.count} borrow records " \
      "(#{BorrowRecord.not_returned.count} not returned)"

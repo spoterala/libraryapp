@@ -53,33 +53,69 @@ RSpec.describe Book, type: :model do
     end
   end
 
-  %i[title author].each do |attribute|
-    describe "##{attribute}" do
-      it "is required" do
-        book[attribute] = ""
+  describe "#title" do
+    it "is required" do
+      book.title = ""
 
-        expect(book).not_to be_valid
-        expect(book.errors[attribute]).to include("can't be blank")
-      end
+      expect(book).not_to be_valid
+      expect(book.errors[:title]).to include("can't be blank")
+    end
 
-      it "can be up to 255 characters long" do
-        book[attribute] = "a" * 255
+    it "can be up to 255 characters long" do
+      book.title = "a" * 255
 
-        expect(book).to be_valid
-      end
+      expect(book).to be_valid
+    end
 
-      it "can't be longer than 255 characters" do
-        book[attribute] = "a" * 256
+    it "can't be longer than 255 characters" do
+      book.title = "a" * 256
 
-        expect(book).not_to be_valid
-        expect(book.errors[attribute]).to include("is too long (maximum is 255 characters)")
-      end
+      expect(book).not_to be_valid
+      expect(book.errors[:title]).to include("is too long (maximum is 255 characters)")
+    end
 
-      it "is limited by the database too" do
-        book[attribute] = "a" * 256
+    it "is limited by the database too" do
+      book.title = "a" * 256
 
-        expect { book.save!(validate: false) }.to raise_error(ActiveRecord::ValueTooLong)
-      end
+      expect { book.save!(validate: false) }.to raise_error(ActiveRecord::ValueTooLong)
+    end
+  end
+
+  describe "#author" do
+    it "is required" do
+      book.author = nil
+
+      expect(book).not_to be_valid
+      expect(book.errors[:author_id]).to eq([ "can't be blank" ])
+    end
+
+    it "is required by the database too" do
+      book.author = nil
+
+      expect { book.save!(validate: false) }.to raise_error(ActiveRecord::NotNullViolation)
+    end
+
+    it "must be an existing author in the database" do
+      book.author_id = 0
+
+      expect { book.save!(validate: false) }.to raise_error(ActiveRecord::InvalidForeignKey)
+    end
+  end
+
+  describe "#author_id" do
+    it "must belong to an existing author" do
+      book.author_id = 0
+
+      expect(book).not_to be_valid
+      expect(book.errors[:author_id]).to eq([ "doesn't match any author" ])
+    end
+
+    it "links the book to that author" do
+      author = create(:author)
+      book.author_id = author.id
+
+      expect(book.author).to eq(author)
+      expect(book).to be_valid
     end
   end
 

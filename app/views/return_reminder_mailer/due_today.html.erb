@@ -3,7 +3,7 @@
 <p>This is a reminder that the book you borrowed is due <strong>today</strong>:</p>
 
 <p>
-  <strong><%= @book.title %></strong> by <%= @book.author %><br>
+  <strong><%= @book.title %></strong> by <%= @book.author.name %><br>
   Due date: <%= l(@due_date, format: :long) %>
 </p>
 

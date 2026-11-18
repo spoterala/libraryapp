@@ -10,17 +10,25 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_18_100200) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_18_140000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
+
+  create_table "authors", force: :cascade do |t|
+    t.string "name", limit: 255, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index "lower((name)::text)", name: "index_authors_on_lower_name", unique: true
+  end
 
   create_table "books", force: :cascade do |t|
     t.string "serial_number", limit: 6, null: false
     t.string "title", limit: 255, null: false
-    t.string "author", limit: 255, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.datetime "deleted_at"
+    t.bigint "author_id", null: false
+    t.index ["author_id"], name: "index_books_on_author_id"
     t.index ["serial_number"], name: "index_books_on_serial_number", unique: true
     t.check_constraint "serial_number::text ~ '^[0-9]{6}$'::text", name: "books_serial_number_six_digits"
   end
@@ -203,6 +211,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_18_100200) do
     t.index ["key"], name: "index_solid_queue_semaphores_on_key", unique: true
   end
 
+  add_foreign_key "books", "authors"
   add_foreign_key "borrow_records", "books", on_delete: :restrict
   add_foreign_key "borrow_records", "readers"
   add_foreign_key "solid_queue_batch_executions", "solid_queue_batches", column: "batch_id", on_delete: :cascade

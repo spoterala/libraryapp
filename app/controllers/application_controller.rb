@@ -45,13 +45,24 @@ class ApplicationController < ActionController::API
     render_error("Validation failed", :unprocessable_content, details: record.errors.to_hash)
   end
 
-  # JSON can send numbers, booleans, arrays or objects where text is expected. Rails would
-  # silently turn them into text or drop them, so they're rejected with 422 instead.
-  # Missing values and null are left to the model's presence validations.
-  def require_string_values!(attributes, keys)
-    details = keys.each_with_object({}) do |key, errors|
+  TYPE_NAMES = { String => "a string", Integer => "an integer" }.freeze
+
+  # params.expect(root => types.keys), checking that each value has its type, e.g.
+  # expect_typed_params(:book, title: String, author_id: Integer). JSON can send another type than
+  # expected (a number for a title, "4" or 4.5 for an id, an array or object anywhere); Rails would
+  # silently convert or drop it, so it's rejected with 422 instead. This is checked first, because
+  # dropping every value would look like missing parameters (400). Missing values and null are left
+  # to the model's validations.
+  def expect_typed_params(root, types)
+    attributes = params[root]
+    require_types!(attributes, types) if attributes.is_a?(ActionController::Parameters)
+    params.expect(root => types.keys)
+  end
+
+  def require_types!(attributes, types)
+    details = types.each_with_object({}) do |(key, type), errors|
       value = attributes[key]
-      errors[key] = [ "must be a string" ] unless value.nil? || value.is_a?(String)
+      errors[key] = [ "must be #{TYPE_NAMES.fetch(type)}" ] unless value.nil? || value.is_a?(type)
     end
     raise InvalidInputError, details if details.any?
   end

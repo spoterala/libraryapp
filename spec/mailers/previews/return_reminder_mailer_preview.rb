@@ -13,13 +13,13 @@ class ReturnReminderMailerPreview < ActionMailer::Preview
 
   # The due date is changed in memory only, so the preview shows the right wording
   def loan(due_in_days:)
-    record = BorrowRecord.not_returned.includes(:reader, :book).first || example_loan
+    record = BorrowRecord.not_returned.includes(:reader, book: :author).first || example_loan
     record.due_date = Date.current + due_in_days
     record
   end
 
   def example_loan
     BorrowRecord.new(reader: Reader.new(full_name: "Elizabeth Bennet", email: "elizabeth.bennet@example.com"),
-                     book: Book.new(title: "Pride and Prejudice", author: "Jane Austen"))
+                     book: Book.new(title: "Pride and Prejudice", author: Author.new(name: "Jane Austen")))
   end
 end

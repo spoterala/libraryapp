@@ -76,7 +76,7 @@ Library app — what do you want to do?
 | 5) Bundle install | Updates `Gemfile.lock` after editing the `Gemfile`, rebuilds the image and restarts the app if it is running. | `bundle install`, then `docker compose build web` |
 | 6) Rails console | Opens the Rails console, in the running app container or a temporary one. Type `exit` to go back to the menu. | `bin/rails console` |
 | 7) Show app logs | Follows the logs of the Rails server and the job worker. Press Ctrl+C to go back to the menu. | `docker compose logs --follow --tail 100 web jobs` |
-| 8) Load seed data | Adds 5 books, 5 readers and 9 borrow records from `db/seeds.rb`. Safe to run again: nothing is duplicated. | `bin/rails db:seed` |
+| 8) Load seed data | Adds 3 authors, 5 books, 5 readers and 9 borrow records from `db/seeds.rb`. Safe to run again: nothing is duplicated. | `bin/rails db:seed` |
 | 9) Reset data | **Deletes all data** in the development database, then loads the seed data again. Asks for confirmation first. | `bin/rails db:seed:replant` |
 | 10) Send return reminders now | Runs the reminder job immediately instead of waiting for 08:00. Emails are saved in `tmp/mails/`. | `bin/rails runner 'SendReturnRemindersJob.perform_now'` |
 | 0) Exit | Closes the menu. The app keeps running. | — |
@@ -176,7 +176,9 @@ All endpoints are under `/api/v1/`. Requests and responses are JSON.
 
 - Books are identified by their **serial number** (six digits, e.g. `000001`).
 - Readers are identified by their **library card number** (six digits, e.g. `100001`).
-- Database ids are never shown.
+- Authors are identified by their **id** (an integer, e.g. `1`). Books refer to their author by this id
+  (`author_id`).
+- Other database ids (of books, readers and borrow records) are never shown.
 - Send `Content-Type: application/json` with every request that has a body.
 - Text fields must be sent as JSON strings. Numbers, booleans, arrays or objects are rejected
   with `422` (`"must be a string"`), not converted.
@@ -191,6 +193,10 @@ All endpoints are under `/api/v1/`. Requests and responses are JSON.
 | `DELETE` | `/api/v1/books/:serial_number` | [Delete a book](#delete-a-book) |
 | `POST` | `/api/v1/books/:serial_number/borrow` | [Borrow a book](#borrow-a-book) |
 | `POST` | `/api/v1/books/:serial_number/return` | [Return a book](#return-a-book) |
+| `GET` | `/api/v1/authors` | [List authors](#list-authors) |
+| `GET` | `/api/v1/authors/:id` | [Show an author with their books](#show-an-author) |
+| `POST` | `/api/v1/authors` | [Add an author](#add-an-author) |
+| `DELETE` | `/api/v1/authors/:id` | [Delete an author](#delete-an-author) |
 | `GET` | `/api/v1/readers` | [List readers](#list-readers) |
 | `GET` | `/api/v1/readers/:library_card_number` | [Show a reader with their borrowing history](#show-a-reader) |
 | `POST` | `/api/v1/readers` | [Add a reader](#add-a-reader) |
@@ -208,9 +214,9 @@ field and is only present for `422`.
 
 | Status | When | `message` |
 |---|---|---|
-| `400 Bad Request` | The required top-level key (`book` / `reader`) is missing | `param is missing or the value is empty or invalid: book` |
+| `400 Bad Request` | The required top-level key (`book` / `author` / `reader`) is missing | `param is missing or the value is empty or invalid: book` |
 | `400 Bad Request` | The request body is not valid JSON | `Request body is not valid JSON` |
-| `404 Not Found` | No book / reader with that number, or the path doesn't exist | `Book not found`, `Not found` |
+| `404 Not Found` | No book / author / reader with that number or id, or the path doesn't exist | `Book not found`, `Not found` |
 | `409 Conflict` | The action isn't allowed in the current state (e.g. the book is already borrowed) | `Book is already borrowed` |
 | `422 Unprocessable Content` | Validation failed (with `details`) | `Validation failed` |
 
@@ -232,7 +238,8 @@ Returns all books, ordered by serial number.
 |---|---|
 | `serial_number` | Six digits |
 | `title` | Title |
-| `author` | Author |
+| `author_id` | The author's id (see [Authors](#authors)) |
+| `author` | The author's name |
 | `status` | `"available"` or `"borrowed"` |
 | `due_date` | When the book must be returned, or `null` if it is available |
 
@@ -245,6 +252,7 @@ curl http://localhost:3000/api/v1/books
   {
     "serial_number": "000001",
     "title": "Pride and Prejudice",
+    "author_id": 1,
     "author": "Jane Austen",
     "status": "borrowed",
     "due_date": "2026-11-20"
@@ -252,6 +260,7 @@ curl http://localhost:3000/api/v1/books
   {
     "serial_number": "000002",
     "title": "Emma",
+    "author_id": 1,
     "author": "Jane Austen",
     "status": "available",
     "due_date": null
@@ -280,6 +289,7 @@ curl http://localhost:3000/api/v1/books/000002
 {
   "serial_number": "000002",
   "title": "Emma",
+  "author_id": 1,
   "author": "Jane Austen",
   "status": "available",
   "due_date": null,
@@ -308,22 +318,26 @@ curl http://localhost:3000/api/v1/books/000002
 |---|---|---|
 | `book.serial_number` | yes | Exactly six digits, unique |
 | `book.title` | yes | Up to 255 characters |
-| `book.author` | yes | Up to 255 characters |
+| `book.author_id` | yes | Id of an existing author, as a JSON integer (not `"4"`). Add new authors first with [Add an author](#add-an-author). |
 
 **Output:** `201 Created`, the new book (same fields as in the list)
 
-**Errors:** `400` no `book` key, `422` validation failed
+**Errors:** `400` no `book` key, `422` validation failed (e.g. `"author_id": ["doesn't match any author"]`)
+
+Stanisław Lem isn't in the seed data, so [add him as an author](#add-an-author) first. With the seed
+data he gets id `4`:
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/books \
      -H 'Content-Type: application/json' \
-     -d '{"book": {"serial_number": "000123", "title": "Solaris", "author": "Stanisław Lem"}}'
+     -d '{"book": {"serial_number": "000123", "title": "Solaris", "author_id": 4}}'
 ```
 
 ```json
 {
   "serial_number": "000123",
   "title": "Solaris",
+  "author_id": 4,
   "author": "Stanisław Lem",
   "status": "available",
   "due_date": null
@@ -452,6 +466,99 @@ curl -X POST http://localhost:3000/api/v1/books/000002/return
 
 ---
 
+### Authors
+
+Books link to an author record, so an author's name is typed once, when the author is added.
+Book responses show both `author_id` and `author` (the author's name).
+
+#### List authors
+
+`GET /api/v1/authors`
+
+**Output:** `200 OK`, all authors ordered by name, each with `id` and `name`
+
+```bash
+curl http://localhost:3000/api/v1/authors
+```
+
+```json
+[
+  { "id": 2, "name": "Elizabeth Gaskell" },
+  { "id": 1, "name": "Jane Austen" },
+  { "id": 3, "name": "Jeff Wheeler" }
+]
+```
+
+#### Show an author
+
+`GET /api/v1/authors/:id`
+
+**Output:** `200 OK`, the author plus `books`: their books ordered by title, with the same fields as in
+the [list of books](#list-books). Deleted books aren't included.
+
+**Errors:** `404` author not found
+
+```bash
+curl http://localhost:3000/api/v1/authors/3
+```
+
+```json
+{
+  "id": 3,
+  "name": "Jeff Wheeler",
+  "books": [
+    { "serial_number": "000005", "title": "The Banished of Muirwood", "author_id": 3, "author": "Jeff Wheeler", "status": "borrowed", "due_date": "2026-11-04" },
+    { "serial_number": "000004", "title": "The King's Traitor", "author_id": 3, "author": "Jeff Wheeler", "status": "available", "due_date": null }
+  ]
+}
+```
+
+#### Add an author
+
+`POST /api/v1/authors`
+
+**Input:**
+
+| Field | Required | Rules |
+|---|---|---|
+| `author.name` | yes | Up to 255 characters, unique (letter case doesn't matter). Extra spaces are removed. |
+
+**Output:** `201 Created`, the new author (`id`, `name`)
+
+**Errors:** `400` no `author` key, `422` validation failed
+
+```bash
+curl -X POST http://localhost:3000/api/v1/authors \
+     -H 'Content-Type: application/json' \
+     -d '{"author": {"name": "Stanisław Lem"}}'
+```
+
+```json
+{ "id": 4, "name": "Stanisław Lem" }
+```
+
+#### Delete an author
+
+`DELETE /api/v1/authors/:id`
+
+Authors who have any books (even deleted ones) can't be deleted.
+
+**Output:** `204 No Content`, empty body
+
+**Errors:** `404` author not found, `409` author has books
+
+```bash
+curl -X DELETE http://localhost:3000/api/v1/authors/4
+```
+
+Error (`409`):
+
+```json
+{ "error": { "message": "Cannot delete an author who has books" } }
+```
+
+---
+
 ### Readers
 
 #### List readers
@@ -522,6 +629,7 @@ curl http://localhost:3000/api/v1/readers/100002
       "book": {
         "serial_number": "000002",
         "title": "Emma",
+        "author_id": 1,
         "author": "Jane Austen"
       }
     }
@@ -600,7 +708,7 @@ Error (`409`):
 - [ ] **Limit of borrowed books per reader.** A reader can currently borrow any number of books at once.
 - [ ] **Pagination for the list of books.** `GET /api/v1/books` returns every book in one response,
   which will get slow as the catalogue grows.
-- [ ] **Separate authors table.** The author is a text field on each book. Authors should be their own
-  table, with books linked to them, so the same author isn't typed (and possibly misspelled) many times.
+- [ ] **Renaming authors.** There is no `PATCH /api/v1/authors/:id`, so a misspelled author name
+  can't be corrected through the API (it would fix all their books at once).
 - [ ] **Searching books and readers.** There is no way to search, e.g. books by title or author,
   or readers by name or email.
