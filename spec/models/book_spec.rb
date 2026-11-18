@@ -31,6 +31,14 @@ RSpec.describe Book, type: :model do
       end
     end
 
+    ["12345", "12a456", "abcdef", "12 456"].each do |serial|
+      it "is rejected by the database as #{serial.inspect} even when validations are skipped" do
+        book.serial_number = serial
+
+        expect { book.save!(validate: false) }.to raise_error(ActiveRecord::CheckViolation)
+      end
+    end
+
     context "when another book already has the same serial number" do
       before { create(:book, serial_number: book.serial_number) }
 
@@ -45,21 +53,33 @@ RSpec.describe Book, type: :model do
     end
   end
 
-  describe "#title" do
-    it "is required" do
-      book.title = ""
+  %i[title author].each do |attribute|
+    describe "##{attribute}" do
+      it "is required" do
+        book[attribute] = ""
 
-      expect(book).not_to be_valid
-      expect(book.errors[:title]).to include("can't be blank")
-    end
-  end
+        expect(book).not_to be_valid
+        expect(book.errors[attribute]).to include("can't be blank")
+      end
 
-  describe "#author" do
-    it "is required" do
-      book.author = ""
+      it "can be up to 255 characters long" do
+        book[attribute] = "a" * 255
 
-      expect(book).not_to be_valid
-      expect(book.errors[:author]).to include("can't be blank")
+        expect(book).to be_valid
+      end
+
+      it "can't be longer than 255 characters" do
+        book[attribute] = "a" * 256
+
+        expect(book).not_to be_valid
+        expect(book.errors[attribute]).to include("is too long (maximum is 255 characters)")
+      end
+
+      it "is limited by the database too" do
+        book[attribute] = "a" * 256
+
+        expect { book.save!(validate: false) }.to raise_error(ActiveRecord::ValueTooLong)
+      end
     end
   end
 
@@ -74,28 +94,23 @@ RSpec.describe Book, type: :model do
       expect(book.borrow_records).to contain_exactly(record)
     end
 
-    it "prevents deleting a book that is currently borrowed" do
-      record = create(:borrow_record, reader: reader, book: book)
+    it "can't be removed from the database while it has borrow records, so the history is kept" do
+      record = create(:borrow_record, :returned, reader: reader, book: book)
 
       expect(book.destroy).to be(false)
-      expect(book.errors[:base]).to include("Cannot delete a book that is currently borrowed")
+      expect(book.errors[:base]).to include("Cannot delete record because dependent borrow records exist")
       expect(BorrowRecord.exists?(record.id)).to be(true)
     end
 
-    it "deletes a book whose loans were all returned, together with its borrow records" do
-      record = create(:borrow_record, :returned, reader: reader, book: book)
+    it "is protected by the database too (the foreign key restricts deletion)" do
+      create(:borrow_record, :returned, reader: reader, book: book)
 
-      expect(book.destroy).to be_truthy
-      expect(Book.exists?(book.id)).to be(false)
-      expect(BorrowRecord.exists?(record.id)).to be(false)
+      expect { book.delete }.to raise_error(ActiveRecord::InvalidForeignKey)
     end
 
-    it "deletes the borrow records at the database level too" do
-      record = create(:borrow_record, :returned, reader: reader, book: book)
-
-      book.delete # skips Rails callbacks, so only the foreign key's ON DELETE CASCADE runs
-
-      expect(BorrowRecord.exists?(record.id)).to be(false)
+    it "can be removed from the database when it has no borrow records" do
+      expect(book.destroy).to be_truthy
+      expect(Book.exists?(book.id)).to be(false)
     end
 
     it "keeps its borrow records when the serial number changes (they link by id)" do
@@ -155,6 +170,35 @@ RSpec.describe Book, type: :model do
 
       expect(record).not_to be_persisted
       expect(record.errors[:book]).to include("is already borrowed and not returned yet")
+    end
+  end
+
+  describe "#soft_delete, #deleted? and .kept" do
+    before { book.save! }
+
+    it "is not deleted when created" do
+      expect(book).not_to be_deleted
+      expect(Book.kept).to contain_exactly(book)
+    end
+
+    it "marks the book as deleted, keeping it and its borrow records" do
+      record = create(:borrow_record, :returned, book: book)
+
+      expect(book.soft_delete).to be(true)
+
+      expect(book.reload).to be_deleted
+      expect(Book.kept).to be_empty
+      expect(Book.exists?(book.id)).to be(true)
+      expect(BorrowRecord.exists?(record.id)).to be(true)
+    end
+
+    it "refuses to delete a book that is currently borrowed" do
+      create(:borrow_record, book: book)
+
+      expect(book.soft_delete).to be(false)
+
+      expect(book.errors[:base]).to include("Cannot delete a book that is currently borrowed")
+      expect(book.reload).not_to be_deleted
     end
   end
 end

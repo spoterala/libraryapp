@@ -75,7 +75,7 @@ RSpec.describe "Books API", type: :request do
       get "/api/v1/books/999999"
 
       expect(response).to have_http_status(:not_found)
-      expect(json["error"]).to eq("Book not found")
+      expect(json.dig("error", "message")).to eq("Book not found")
     end
   end
 
@@ -94,7 +94,8 @@ RSpec.describe "Books API", type: :request do
       post "/api/v1/books", params: { book: { serial_number: "12", title: "" } }, as: :json
 
       expect(response).to have_http_status(:unprocessable_content)
-      expect(json["errors"]).to include("serial_number" => [ "must be exactly six digits" ],
+      expect(json.dig("error", "message")).to eq("Validation failed")
+      expect(json.dig("error", "details")).to include("serial_number" => [ "must be exactly six digits" ],
                                         "title" => [ "can't be blank" ],
                                         "author" => [ "can't be blank" ])
     end
@@ -105,51 +106,105 @@ RSpec.describe "Books API", type: :request do
       expect { post "/api/v1/books", params: params, as: :json }.not_to change(Book, :count)
 
       expect(response).to have_http_status(:unprocessable_content)
-      expect(json["errors"]["serial_number"]).to include("has already been taken")
+      expect(json.dig("error", "details", "serial_number")).to include("has already been taken")
+    end
+
+    it "rejects a title or author that is too long" do
+      post "/api/v1/books", params: { book: params[:book].merge(title: "a" * 256, author: "a" * 256) }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(json.dig("error", "details")).to eq("title" => [ "is too long (maximum is 255 characters)" ],
+                                                 "author" => [ "is too long (maximum is 255 characters)" ])
+    end
+
+    it "rejects values that are not strings instead of converting or dropping them" do
+      expect do
+        post "/api/v1/books", params: { book: { serial_number: 123_456, title: [ "Emma" ],
+                                                author: { "name" => "Jane Austen" } } }, as: :json
+      end.not_to change(Book, :count)
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(json.dig("error", "details")).to eq("serial_number" => [ "must be a string" ],
+                                                 "title" => [ "must be a string" ],
+                                                 "author" => [ "must be a string" ])
+    end
+
+    it "returns 400 for a request body that is not valid JSON" do
+      post "/api/v1/books", params: '{"book": {"title": ', headers: { "CONTENT_TYPE" => "application/json" }
+
+      expect(response).to have_http_status(:bad_request)
+      expect(json).to eq("error" => { "message" => "Request body is not valid JSON" })
     end
 
     it "returns 400 when the book parameters are missing" do
       post "/api/v1/books", params: {}, as: :json
 
       expect(response).to have_http_status(:bad_request)
-      expect(json["error"]).to be_present
+      expect(json.dig("error", "message")).to be_present
     end
   end
 
   describe "DELETE /api/v1/books/:serial_number" do
     let!(:book) { create(:book, serial_number: "000123") }
 
-    it "deletes a book" do
-      expect { delete "/api/v1/books/000123" }.to change(Book, :count).by(-1)
+    it "marks the book as deleted, keeping it in the database" do
+      expect { delete "/api/v1/books/000123" }.not_to change(Book, :count)
 
       expect(response).to have_http_status(:no_content)
       expect(response.body).to be_empty
+      expect(book.reload).to be_deleted
     end
 
-    it "deletes a book whose loans were returned, together with its borrow records" do
-      create(:borrow_record, :returned, book: book)
+    it "keeps the borrowing history of a deleted book" do
+      reader = create(:reader, library_card_number: "100001")
+      create(:borrow_record, :returned, book: book, reader: reader)
 
-      expect { delete "/api/v1/books/000123" }.to change(BorrowRecord, :count).by(-1)
+      expect { delete "/api/v1/books/000123" }.not_to change(BorrowRecord, :count)
 
       expect(response).to have_http_status(:no_content)
-      expect(Book.exists?(book.id)).to be(false)
+      get "/api/v1/readers/100001"
+      expect(json["borrow_records"].map { it.dig("book", "serial_number") }).to eq([ "000123" ])
     end
 
-      # The book with its whole borrowing history, newest loan first
+    it "hides a deleted book from the API" do
+      delete "/api/v1/books/000123"
+
+      get "/api/v1/books"
+      expect(json).to eq([])
+      get "/api/v1/books/000123"
+      expect(response).to have_http_status(:not_found)
+      post "/api/v1/books/000123/borrow", params: { reader_card_number: create(:reader).library_card_number },
+                                          as: :json
+      expect(response).to have_http_status(:not_found)
+      delete "/api/v1/books/000123"
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it "doesn't let a new book reuse a deleted book's serial number" do
+      delete "/api/v1/books/000123"
+
+      post "/api/v1/books", params: { book: { serial_number: "000123", title: "Emma", author: "Jane Austen" } },
+                            as: :json
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(json.dig("error", "details", "serial_number")).to eq([ "has already been taken" ])
+    end
+
     it "refuses to delete a book that is currently borrowed" do
       create(:borrow_record, book: book)
 
-      expect { delete "/api/v1/books/000123" }.not_to change(Book, :count)
+      delete "/api/v1/books/000123"
 
       expect(response).to have_http_status(:conflict)
-      expect(json["error"]).to eq("Cannot delete a book that is currently borrowed")
+      expect(json).to eq("error" => { "message" => "Cannot delete a book that is currently borrowed" })
+      expect(book.reload).not_to be_deleted
     end
 
     it "returns 404 for an unknown serial number" do
       delete "/api/v1/books/999999"
 
       expect(response).to have_http_status(:not_found)
-      expect(json["error"]).to eq("Book not found")
+      expect(json.dig("error", "message")).to eq("Book not found")
     end
   end
 
@@ -186,55 +241,61 @@ RSpec.describe "Books API", type: :request do
       end.not_to change(BorrowRecord, :count)
 
       expect(response).to have_http_status(:conflict)
-      expect(json["error"]).to eq("Book is already borrowed")
+      expect(json.dig("error", "message")).to eq("Book is already borrowed")
     end
 
     it "returns 422 for an unknown reader card number" do
       post "/api/v1/books/000123/borrow", params: { reader_card_number: "999999" }, as: :json
 
       expect(response).to have_http_status(:unprocessable_content)
-      expect(json["errors"]).to eq("reader_card_number" => [ "doesn't match any reader" ])
+      expect(json.dig("error", "details")).to eq("reader_card_number" => [ "doesn't match any reader" ])
     end
 
     it "returns 422 when the reader card number is missing" do
       post "/api/v1/books/000123/borrow", params: {}, as: :json
 
       expect(response).to have_http_status(:unprocessable_content)
-      expect(json["errors"]).to eq("reader_card_number" => [ "can't be blank" ])
+      expect(json.dig("error", "details")).to eq("reader_card_number" => [ "can't be blank" ])
     end
 
-    context "when another request borrows the book at the same moment" do
-      # The other loan appears after this request checked that the book is available
-      before do
-        create(:borrow_record, book: book)
-        allow(Book).to receive(:find_by!).with(serial_number: "000123").and_return(book)
-      end
-
-      it "returns 422 when the model validation catches it" do
-        allow(book).to receive(:borrowed?).and_return(false)
-
-        post "/api/v1/books/000123/borrow", params: { reader_card_number: "000042" }, as: :json
+    it "returns 422 when the reader card number is not a string" do
+      [ 100_001, [ "000042" ], { "number" => "000042" }, true ].each do |card_number|
+        expect do
+          post "/api/v1/books/000123/borrow", params: { reader_card_number: card_number }, as: :json
+        end.not_to change(BorrowRecord, :count)
 
         expect(response).to have_http_status(:unprocessable_content)
-        expect(json["errors"]).to eq("book" => [ "is already borrowed and not returned yet" ])
+        expect(json.dig("error", "details")).to eq("reader_card_number" => [ "must be a string" ])
       end
+    end
 
-      it "returns 409 when the database unique index catches it" do
-        allow(book).to receive(:borrowed?).and_return(false)
-        allow(book).to receive(:borrow_by).and_raise(ActiveRecord::RecordNotUnique)
+    it "returns 422 with the record's errors when the loan is invalid for another reason" do
+      invalid_record = BorrowRecord.new.tap { it.errors.add(:due_date, "can't be blank") }
+      allow(Borrowing).to receive(:borrow).and_raise(ActiveRecord::RecordInvalid, invalid_record)
 
-        post "/api/v1/books/000123/borrow", params: { reader_card_number: "000042" }, as: :json
+      post "/api/v1/books/000123/borrow", params: { reader_card_number: "000042" }, as: :json
 
-        expect(response).to have_http_status(:conflict)
-        expect(json["error"]).to eq("Conflicts with an existing record")
-      end
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(json).to eq("error" => { "message" => "Validation failed",
+                                      "details" => { "due_date" => [ "can't be blank" ] } })
+    end
+
+    # The other cases (the model validation or the database index catching a loan made at the
+    # same moment) are in spec/services/borrowing_spec.rb; they give the same answer.
+    it "answers a conflict with the same status and message whichever check catches it" do
+      allow(Borrowing).to receive(:borrow).and_raise(ConflictError, Borrowing::ALREADY_BORROWED)
+
+      post "/api/v1/books/000123/borrow", params: { reader_card_number: "000042" }, as: :json
+
+      expect(response).to have_http_status(:conflict)
+      expect(json).to eq("error" => { "message" => "Book is already borrowed" })
     end
 
     it "returns 404 for an unknown serial number" do
       post "/api/v1/books/999999/borrow", params: { reader_card_number: "000042" }, as: :json
 
       expect(response).to have_http_status(:not_found)
-      expect(json["error"]).to eq("Book not found")
+      expect(json.dig("error", "message")).to eq("Book not found")
     end
   end
 
@@ -261,14 +322,30 @@ RSpec.describe "Books API", type: :request do
       post "/api/v1/books/000123/return"
 
       expect(response).to have_http_status(:conflict)
-      expect(json["error"]).to eq("Book is not borrowed")
+      expect(json.dig("error", "message")).to eq("Book is not borrowed")
     end
 
     it "returns 404 for an unknown serial number" do
       post "/api/v1/books/999999/return"
 
       expect(response).to have_http_status(:not_found)
-      expect(json["error"]).to eq("Book not found")
+      expect(json.dig("error", "message")).to eq("Book not found")
+    end
+  end
+
+  describe "unknown paths" do
+    it "returns 404 in the API's error format" do
+      get "/api/v1/authors"
+
+      expect(response).to have_http_status(:not_found)
+      expect(json).to eq("error" => { "message" => "Not found" })
+    end
+
+    it "returns 404 for a method the path doesn't support" do
+      patch "/api/v1/books/000123"
+
+      expect(response).to have_http_status(:not_found)
+      expect(json.dig("error", "message")).to eq("Not found")
     end
   end
 end

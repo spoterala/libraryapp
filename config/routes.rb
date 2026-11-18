@@ -16,4 +16,7 @@ Rails.application.routes.draw do
       resources :readers, only: %i[index show create destroy], param: :library_card_number
     end
   end
+
+  # Anything else gets a 404 in the API's error format. Must stay the last route.
+  match "*path", to: "application#route_not_found", via: :all, format: false
 end

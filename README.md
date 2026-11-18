@@ -162,6 +162,7 @@ both emails:
 | Web server | Puma |
 | Background jobs | Solid Queue (stored in the main PostgreSQL database, no Redis needed) |
 | Emails | Action Mailer (saved to files in development) |
+| JSON serializers | Alba (`app/resources/`) |
 | Tests | RSpec, FactoryBot |
 | Test coverage | SimpleCov (100% line and branch coverage required) |
 | Development environment | Docker, Docker Compose |
@@ -177,6 +178,8 @@ All endpoints are under `/api/v1/`. Requests and responses are JSON.
 - Readers are identified by their **library card number** (six digits, e.g. `100001`).
 - Database ids are never shown.
 - Send `Content-Type: application/json` with every request that has a body.
+- Text fields must be sent as JSON strings. Numbers, booleans, arrays or objects are rejected
+  with `422` (`"must be a string"`), not converted.
 
 ### Summary
 
@@ -195,12 +198,21 @@ All endpoints are under `/api/v1/`. Requests and responses are JSON.
 
 ### Errors
 
-| Status | When | Body |
+Every error has the same shape. `message` is always there. `details` lists the problems per
+field and is only present for `422`.
+
+```json
+{ "error": { "message": "Validation failed", "details": { "serial_number": ["has already been taken"] } } }
+{ "error": { "message": "Book not found" } }
+```
+
+| Status | When | `message` |
 |---|---|---|
-| `400 Bad Request` | The required top-level key (`book` / `reader`) is missing | `{"error": "param is missing or the value is empty or invalid: book"}` |
-| `404 Not Found` | No book / reader with that number | `{"error": "Book not found"}` |
-| `409 Conflict` | The action isn't allowed in the current state (e.g. the book is already borrowed) | `{"error": "Book is already borrowed"}` |
-| `422 Unprocessable Content` | Validation failed | `{"errors": {"serial_number": ["has already been taken"]}}` |
+| `400 Bad Request` | The required top-level key (`book` / `reader`) is missing | `param is missing or the value is empty or invalid: book` |
+| `400 Bad Request` | The request body is not valid JSON | `Request body is not valid JSON` |
+| `404 Not Found` | No book / reader with that number, or the path doesn't exist | `Book not found`, `Not found` |
+| `409 Conflict` | The action isn't allowed in the current state (e.g. the book is already borrowed) | `Book is already borrowed` |
+| `422 Unprocessable Content` | Validation failed (with `details`) | `Validation failed` |
 
 ---
 
@@ -295,8 +307,8 @@ curl http://localhost:3000/api/v1/books/000002
 | Field | Required | Rules |
 |---|---|---|
 | `book.serial_number` | yes | Exactly six digits, unique |
-| `book.title` | yes | |
-| `book.author` | yes | |
+| `book.title` | yes | Up to 255 characters |
+| `book.author` | yes | Up to 255 characters |
 
 **Output:** `201 Created`, the new book (same fields as in the list)
 
@@ -322,9 +334,12 @@ Validation error (`422`):
 
 ```json
 {
-  "errors": {
-    "serial_number": ["must be exactly six digits"],
-    "title": ["can't be blank"]
+  "error": {
+    "message": "Validation failed",
+    "details": {
+      "serial_number": ["must be exactly six digits"],
+      "title": ["can't be blank"]
+    }
   }
 }
 ```
@@ -333,7 +348,10 @@ Validation error (`422`):
 
 `DELETE /api/v1/books/:serial_number`
 
-Deletes the book together with its borrowing history. A book that is currently borrowed can't be deleted.
+Deletes the book, but keeps its borrowing history: the book is only marked as deleted (soft delete).
+After that it no longer appears in the list, and showing, borrowing, returning or deleting it gives `404`.
+Its past loans still appear in readers' histories. Its serial number can't be used for a new book.
+A book that is currently borrowed can't be deleted.
 
 **Input:** serial number in the URL
 
@@ -348,7 +366,7 @@ curl -X DELETE http://localhost:3000/api/v1/books/000123
 Error (`409`):
 
 ```json
-{ "error": "Cannot delete a book that is currently borrowed" }
+{ "error": { "message": "Cannot delete a book that is currently borrowed" } }
 ```
 
 #### Borrow a book
@@ -362,7 +380,7 @@ Neither can be set by the client.
 
 | Field | Required | Rules |
 |---|---|---|
-| `reader_card_number` | yes | Library card number of an existing reader |
+| `reader_card_number` | yes | Library card number of an existing reader, as a string |
 
 **Output:** `201 Created`, the borrow record
 
@@ -374,7 +392,8 @@ Neither can be set by the client.
 | `due_date` | Today + 30 days |
 | `return_date` | `null` |
 
-**Errors:** `404` book not found, `422` card number missing or no reader with that card number, `409` book is already borrowed
+**Errors:** `404` book not found, `422` card number missing, not a string, or no reader with that card number,
+`409` book is already borrowed (always this status and message, also when two requests borrow the book at the same moment)
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/books/000002/borrow \
@@ -395,8 +414,14 @@ curl -X POST http://localhost:3000/api/v1/books/000002/borrow \
 Missing or unknown reader (`422`):
 
 ```json
-{ "errors": { "reader_card_number": ["can't be blank"] } }
-{ "errors": { "reader_card_number": ["doesn't match any reader"] } }
+{ "error": { "message": "Validation failed", "details": { "reader_card_number": ["can't be blank"] } } }
+{ "error": { "message": "Validation failed", "details": { "reader_card_number": ["doesn't match any reader"] } } }
+```
+
+Already borrowed (`409`):
+
+```json
+{ "error": { "message": "Book is already borrowed" } }
 ```
 
 #### Return a book
@@ -513,8 +538,8 @@ curl http://localhost:3000/api/v1/readers/100002
 | Field | Required | Rules |
 |---|---|---|
 | `reader.library_card_number` | yes | Exactly six digits, unique |
-| `reader.full_name` | yes | |
-| `reader.email` | yes | Valid email address, unique (case doesn't matter; stored in lowercase) |
+| `reader.full_name` | yes | Up to 255 characters |
+| `reader.email` | yes | Valid email address, up to 254 characters, unique (case doesn't matter; stored in lowercase) |
 
 **Output:** `201 Created`, the new reader (`library_card_number`, `full_name`, `email`)
 
@@ -537,7 +562,7 @@ curl -X POST http://localhost:3000/api/v1/readers \
 Validation error (`422`):
 
 ```json
-{ "errors": { "email": ["is not a valid email address"] } }
+{ "error": { "message": "Validation failed", "details": { "email": ["is not a valid email address"] } } }
 ```
 
 #### Delete a reader
@@ -559,7 +584,7 @@ curl -X DELETE http://localhost:3000/api/v1/readers/100006
 Error (`409`):
 
 ```json
-{ "error": "Cannot delete a reader who has borrow records" }
+{ "error": { "message": "Cannot delete a reader who has borrow records" } }
 ```
 
 ---

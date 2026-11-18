@@ -1,18 +1,19 @@
 module Api
   module V1
     class BooksController < ApplicationController
+      BOOK_ATTRIBUTES = %i[serial_number title author].freeze
+
       before_action :set_book, only: %i[show destroy borrow return_book]
 
       # GET /api/v1/books
       def index
-        books = Book.includes(:current_borrow_record).order(:serial_number)
-        render json: books.map { |book| book_json(book) }
+        books = Book.kept.includes(:current_borrow_record).order(:serial_number)
+        render json: BookResource.new(books)
       end
 
       # GET /api/v1/books/:serial_number
       def show
-        history = @book.borrow_records.includes(:reader).order(borrowed_date: :desc, id: :desc)
-        render json: book_json(@book).merge(borrow_records: history.map { |record| history_json(record) })
+        render json: BookDetailResource.new(@book)
       end
 
       # POST /api/v1/books
@@ -20,15 +21,16 @@ module Api
         book = Book.new(book_params)
 
         if book.save
-          render json: book_json(book), status: :created
+          render json: BookResource.new(book), status: :created
         else
           render_validation_errors(book)
         end
       end
 
       # DELETE /api/v1/books/:serial_number
+      # The book is only marked as deleted, so its borrowing history is kept
       def destroy
-        if @book.destroy
+        if @book.soft_delete
           head :no_content
         else
           render_error(@book.errors.full_messages.to_sentence, :conflict)
@@ -37,68 +39,26 @@ module Api
 
       # POST /api/v1/books/:serial_number/borrow
       def borrow
-        card_number = params[:reader_card_number]
-        return render_reader_card_number_error("can't be blank") if card_number.blank?
-
-        reader = Reader.find_by(library_card_number: card_number)
-        return render_reader_card_number_error("doesn't match any reader") unless reader
-        return render_error("Book is already borrowed", :conflict) if @book.borrowed?
-
-        record = @book.borrow_by(reader)
-        if record.persisted?
-          render json: borrow_record_json(record), status: :created
-        else
-          render_validation_errors(record)
-        end
+        record = Borrowing.borrow(@book, reader_card_number: params[:reader_card_number])
+        render json: BorrowRecordResource.new(record), status: :created
       end
 
       # POST /api/v1/books/:serial_number/return
       def return_book
-        record = @book.current_borrow_record
-        return render_error("Book is not borrowed", :conflict) unless record
-
-        record.mark_returned!
-        render json: borrow_record_json(record)
+        record = Borrowing.return_book(@book)
+        render json: BorrowRecordResource.new(record)
       end
 
       private
 
       def set_book
-        @book = Book.find_by!(serial_number: params[:serial_number])
-      end
-
-      def render_reader_card_number_error(message)
-        render json: { errors: { reader_card_number: [ message ] } }, status: :unprocessable_content
+        @book = Book.kept.find_by!(serial_number: params[:serial_number])
       end
 
       def book_params
-        params.expect(book: %i[serial_number title author])
-      end
-
-      def book_json(book)
-        loan = book.current_borrow_record
-        {
-          serial_number: book.serial_number,
-          title: book.title,
-          author: book.author,
-          status: loan ? "borrowed" : "available",
-          due_date: loan&.due_date
-        }
-      end
-
-      # One loan in a book's history, with the reader's details
-      def history_json(record)
-        {
-          borrowed_date: record.borrowed_date,
-          due_date: record.due_date,
-          return_date: record.return_date,
-          reader: record.reader.as_json(only: %i[library_card_number full_name email])
-        }
-      end
-
-      def borrow_record_json(record)
-        record.as_json(only: %i[borrowed_date due_date return_date],
-                       methods: %i[book_serial_number reader_card_number])
+        permitted = params.expect(book: BOOK_ATTRIBUTES)
+        require_string_values!(params[:book], BOOK_ATTRIBUTES)
+        permitted
       end
     end
   end

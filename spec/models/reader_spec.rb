@@ -31,6 +31,14 @@ RSpec.describe Reader, type: :model do
       end
     end
 
+    ["12345", "12a456", "abcdef", "12 456"].each do |number|
+      it "is rejected by the database as #{number.inspect} even when validations are skipped" do
+        reader.library_card_number = number
+
+        expect { reader.save!(validate: false) }.to raise_error(ActiveRecord::CheckViolation)
+      end
+    end
+
     context "when another reader already has the same library card number" do
       before { create(:reader, library_card_number: reader.library_card_number) }
 
@@ -52,6 +60,25 @@ RSpec.describe Reader, type: :model do
       expect(reader).not_to be_valid
       expect(reader.errors[:full_name]).to include("can't be blank")
     end
+
+    it "can be up to 255 characters long" do
+      reader.full_name = "a" * 255
+
+      expect(reader).to be_valid
+    end
+
+    it "can't be longer than 255 characters" do
+      reader.full_name = "a" * 256
+
+      expect(reader).not_to be_valid
+      expect(reader.errors[:full_name]).to include("is too long (maximum is 255 characters)")
+    end
+
+    it "is limited by the database too" do
+      reader.full_name = "a" * 256
+
+      expect { reader.save!(validate: false) }.to raise_error(ActiveRecord::ValueTooLong)
+    end
   end
 
   describe "#email" do
@@ -66,6 +93,25 @@ RSpec.describe Reader, type: :model do
       reader.email = "  Elizabeth.Bennet@Pemberly.COM "
 
       expect(reader.email).to eq("elizabeth.bennet@pemberly.com")
+    end
+
+    it "can be up to 254 characters long" do
+      reader.email = "#{'a' * 242}@example.com"
+
+      expect(reader).to be_valid
+    end
+
+    it "can't be longer than 254 characters" do
+      reader.email = "#{'a' * 243}@example.com"
+
+      expect(reader).not_to be_valid
+      expect(reader.errors[:email]).to include("is too long (maximum is 254 characters)")
+    end
+
+    it "is limited by the database too" do
+      reader.email = "#{'a' * 243}@example.com"
+
+      expect { reader.save!(validate: false) }.to raise_error(ActiveRecord::ValueTooLong)
     end
 
     ["plainaddress", "@pemberly.com", "elizabeth@", "elizabeth bennet@pemberly.com"].each do |email|

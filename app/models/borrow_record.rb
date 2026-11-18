@@ -22,6 +22,7 @@ class BorrowRecord < ApplicationRecord
   validates :book, uniqueness: { conditions: -> { not_returned },
                                  message: "is already borrowed and not returned yet" },
                    if: :not_returned?
+  validate :book_not_deleted, on: :create
   validates :borrowed_date, presence: true
   # On create, a missing due_date is filled in by set_due_date (which runs after validation)
   validates :due_date, presence: true, on: :update
@@ -55,6 +56,10 @@ class BorrowRecord < ApplicationRecord
   end
 
   private
+
+  def book_not_deleted
+    errors.add(:book, "has been deleted") if book&.deleted?
+  end
 
   # Default loan period: due LOAN_PERIOD after borrowing, unless a due_date was given
   def set_due_date

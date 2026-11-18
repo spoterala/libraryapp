@@ -76,6 +76,20 @@ RSpec.describe BorrowRecord, type: :model do
 
       expect { record.save!(validate: false) }.to raise_error(ActiveRecord::InvalidForeignKey)
     end
+
+    it "can't be a deleted book for a new loan" do
+      book.soft_delete
+
+      expect(record).not_to be_valid
+      expect(record.errors[:book]).to include("has been deleted")
+    end
+
+    it "can be a deleted book for an existing loan" do
+      record.update!(return_date: Date.new(2026, 11, 20))
+      book.soft_delete
+
+      expect(record.reload).to be_valid
+    end
   end
 
   describe "#borrowed_date" do

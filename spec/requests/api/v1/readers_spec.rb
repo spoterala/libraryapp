@@ -85,7 +85,7 @@ RSpec.describe "Readers API", type: :request do
       get "/api/v1/readers/999999"
 
       expect(response).to have_http_status(:not_found)
-      expect(json["error"]).to eq("Reader not found")
+      expect(json.dig("error", "message")).to eq("Reader not found")
     end
   end
 
@@ -107,7 +107,7 @@ RSpec.describe "Readers API", type: :request do
       post "/api/v1/readers", params: { reader: { library_card_number: "12", email: "not-an-email" } }, as: :json
 
       expect(response).to have_http_status(:unprocessable_content)
-      expect(json["errors"]).to include("library_card_number" => [ "must be exactly six digits" ],
+      expect(json.dig("error", "details")).to include("library_card_number" => [ "must be exactly six digits" ],
                                         "full_name" => [ "can't be blank" ],
                                         "email" => [ "is not a valid email address" ])
     end
@@ -118,15 +118,47 @@ RSpec.describe "Readers API", type: :request do
       expect { post "/api/v1/readers", params: params, as: :json }.not_to change(Reader, :count)
 
       expect(response).to have_http_status(:unprocessable_content)
-      expect(json["errors"]).to include("library_card_number" => [ "has already been taken" ],
+      expect(json.dig("error", "details")).to include("library_card_number" => [ "has already been taken" ],
                                         "email" => [ "has already been taken" ])
+    end
+
+    it "rejects a name or email that is too long" do
+      post "/api/v1/readers", params: { reader: params[:reader].merge(full_name: "a" * 256,
+                                                                      email: "#{'a' * 243}@example.com") },
+                              as: :json
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(json.dig("error", "details")).to include("full_name" => [ "is too long (maximum is 255 characters)" ])
+      expect(json.dig("error", "details", "email")).to include("is too long (maximum is 254 characters)")
+    end
+
+    it "rejects values that are not strings instead of converting them" do
+      expect do
+        post "/api/v1/readers", params: { reader: { library_card_number: 100_001, full_name: false,
+                                                    email: [ "elizabeth.bennet@example.com" ] } }, as: :json
+      end.not_to change(Reader, :count)
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(json.dig("error", "details")).to eq("library_card_number" => [ "must be a string" ],
+                                                 "full_name" => [ "must be a string" ],
+                                                 "email" => [ "must be a string" ])
+    end
+
+    it "returns 409 when the database catches a duplicate the validation missed" do
+      # e.g. two requests adding the same reader at the same moment
+      allow_any_instance_of(Reader).to receive(:save).and_raise(ActiveRecord::RecordNotUnique)
+
+      post "/api/v1/readers", params: params, as: :json
+
+      expect(response).to have_http_status(:conflict)
+      expect(json).to eq("error" => { "message" => "Conflicts with an existing record" })
     end
 
     it "returns 400 when the reader parameters are missing" do
       post "/api/v1/readers", params: {}, as: :json
 
       expect(response).to have_http_status(:bad_request)
-      expect(json["error"]).to be_present
+      expect(json.dig("error", "message")).to be_present
     end
   end
 
@@ -146,14 +178,14 @@ RSpec.describe "Readers API", type: :request do
       expect { delete "/api/v1/readers/100001" }.not_to change(Reader, :count)
 
       expect(response).to have_http_status(:conflict)
-      expect(json["error"]).to eq("Cannot delete a reader who has borrow records")
+      expect(json.dig("error", "message")).to eq("Cannot delete a reader who has borrow records")
     end
 
     it "returns 404 for an unknown card number" do
       delete "/api/v1/readers/999999"
 
       expect(response).to have_http_status(:not_found)
-      expect(json["error"]).to eq("Reader not found")
+      expect(json.dig("error", "message")).to eq("Reader not found")
     end
   end
 end

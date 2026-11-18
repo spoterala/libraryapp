@@ -1,16 +1,19 @@
 class Book < ApplicationRecord
-  # Deleting a book deletes its borrow records too (the database also cascades the delete),
-  # but a book that is borrowed right now can't be deleted (see ensure_not_borrowed)
-  has_many :borrow_records, dependent: :delete_all
+  TEXT_MAX_LENGTH = 255
+
+  # Books with borrow records are never removed from the database, so the borrowing history
+  # is kept. Deleting a book through the API marks it as deleted instead (see soft_delete).
+  has_many :borrow_records, dependent: :restrict_with_error
   has_one :current_borrow_record, -> { not_returned }, class_name: "BorrowRecord"
+
+  # Books that haven't been deleted. Deleted books keep their serial numbers: they can't be reused.
+  scope :kept, -> { where(deleted_at: nil) }
 
   validates :serial_number, presence: true,
                             format: { with: /\A\d{6}\z/, message: "must be exactly six digits" },
                             uniqueness: true
-  validates :title, presence: true
-  validates :author, presence: true
-
-  before_destroy :ensure_not_borrowed, prepend: true
+  validates :title, presence: true, length: { maximum: TEXT_MAX_LENGTH }
+  validates :author, presence: true, length: { maximum: TEXT_MAX_LENGTH }
 
   def available?
     current_borrow_record.nil?
@@ -20,18 +23,24 @@ class Book < ApplicationRecord
     !available?
   end
 
+  def deleted?
+    deleted_at.present?
+  end
+
+  # Hides the book from the API but keeps it and its borrowing history.
+  # Returns false (with an error) if the book is borrowed right now.
+  def soft_delete
+    if borrowed?
+      errors.add(:base, "Cannot delete a book that is currently borrowed")
+      return false
+    end
+
+    update_columns(deleted_at: Time.current, updated_at: Time.current)
+  end
+
   def borrow_by(reader)
     record = borrow_records.create(reader: reader, borrowed_date: Date.current)
     reset_current_borrow_record if record.persisted?
     record
-  end
-
-  private
-
-  def ensure_not_borrowed
-    return unless borrowed?
-
-    errors.add(:base, "Cannot delete a book that is currently borrowed")
-    throw :abort
   end
 end
