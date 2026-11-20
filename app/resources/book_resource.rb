@@ -1,4 +1,4 @@
-# A book with its availability (list of books, a new book).
+# A book with its availability (list of books, a new or updated book).
 # Preload current_borrow_record when serializing many books.
 class BookResource < BookSummaryResource
   attribute :status do |book|

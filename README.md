@@ -190,16 +190,19 @@ All endpoints are under `/api/v1/`. Requests and responses are JSON.
 | `GET` | `/api/v1/books` | [List books](#list-books) |
 | `GET` | `/api/v1/books/:serial_number` | [Show a book with its borrowing history](#show-a-book) |
 | `POST` | `/api/v1/books` | [Add a book](#add-a-book) |
+| `PATCH` | `/api/v1/books/:serial_number` | [Update a book](#update-a-book) |
 | `DELETE` | `/api/v1/books/:serial_number` | [Delete a book](#delete-a-book) |
 | `POST` | `/api/v1/books/:serial_number/borrow` | [Borrow a book](#borrow-a-book) |
 | `POST` | `/api/v1/books/:serial_number/return` | [Return a book](#return-a-book) |
 | `GET` | `/api/v1/authors` | [List authors](#list-authors) |
 | `GET` | `/api/v1/authors/:id` | [Show an author with their books](#show-an-author) |
 | `POST` | `/api/v1/authors` | [Add an author](#add-an-author) |
+| `PATCH` | `/api/v1/authors/:id` | [Rename an author](#rename-an-author) |
 | `DELETE` | `/api/v1/authors/:id` | [Delete an author](#delete-an-author) |
 | `GET` | `/api/v1/readers` | [List readers](#list-readers) |
 | `GET` | `/api/v1/readers/:library_card_number` | [Show a reader with their borrowing history](#show-a-reader) |
 | `POST` | `/api/v1/readers` | [Add a reader](#add-a-reader) |
+| `PATCH` | `/api/v1/readers/:library_card_number` | [Update a reader](#update-a-reader) |
 | `DELETE` | `/api/v1/readers/:library_card_number` | [Delete a reader](#delete-a-reader) |
 
 ### Errors
@@ -214,7 +217,7 @@ field and is only present for `422`.
 
 | Status | When | `message` |
 |---|---|---|
-| `400 Bad Request` | The required top-level key (`book` / `author` / `reader`) is missing | `param is missing or the value is empty or invalid: book` |
+| `400 Bad Request` | The required top-level key (`book` / `author` / `reader`) is missing, or (for `PATCH`) has no field that can be changed | `param is missing or the value is empty or invalid: book` |
 | `400 Bad Request` | The request body is not valid JSON | `Request body is not valid JSON` |
 | `404 Not Found` | No book / author / reader with that number or id, or the path doesn't exist | `Book not found`, `Not found` |
 | `409 Conflict` | The action isn't allowed in the current state (e.g. the book is already borrowed) | `Book is already borrowed` |
@@ -355,6 +358,43 @@ Validation error (`422`):
       "title": ["can't be blank"]
     }
   }
+}
+```
+
+#### Update a book
+
+`PATCH /api/v1/books/:serial_number`
+
+Changes a book's title and/or author, e.g. to fix a typo. Send only the fields you want to change.
+The serial number can't be changed: sending a different one gives `422` (`"can't be changed"`);
+sending the current one is allowed, so a client can send the whole book back. Deleted books
+can't be updated (`404`). A borrowed book stays borrowed.
+
+**Input:** serial number in the URL, and at least one of:
+
+| Field | Rules |
+|---|---|
+| `book.title` | Up to 255 characters |
+| `book.author_id` | Id of an existing author, as a JSON integer |
+
+**Output:** `200 OK`, the updated book (same fields as in the list)
+
+**Errors:** `400` no `book` key or no field to change, `404` book not found, `422` validation failed
+
+```bash
+curl -X PATCH http://localhost:3000/api/v1/books/000002 \
+     -H 'Content-Type: application/json' \
+     -d '{"book": {"title": "Emma: A Novel"}}'
+```
+
+```json
+{
+  "serial_number": "000002",
+  "title": "Emma: A Novel",
+  "author_id": 1,
+  "author": "Jane Austen",
+  "status": "available",
+  "due_date": null
 }
 ```
 
@@ -537,6 +577,33 @@ curl -X POST http://localhost:3000/api/v1/authors \
 { "id": 4, "name": "Stanisław Lem" }
 ```
 
+#### Rename an author
+
+`PATCH /api/v1/authors/:id`
+
+Changes an author's name, e.g. to fix a misspelling. All their books (including deleted ones)
+show the new name, since they refer to the author by id.
+
+**Input:** id in the URL, and:
+
+| Field | Required | Rules |
+|---|---|---|
+| `author.name` | yes | Same rules as when adding: up to 255 characters, unique (letter case doesn't matter, but an author can change the letter case of their own name). Extra spaces are removed. |
+
+**Output:** `200 OK`, the author (`id`, `name`)
+
+**Errors:** `400` no `author` key, `404` author not found, `422` validation failed
+
+```bash
+curl -X PATCH http://localhost:3000/api/v1/authors/2 \
+     -H 'Content-Type: application/json' \
+     -d '{"author": {"name": "Elizabeth Cleghorn Gaskell"}}'
+```
+
+```json
+{ "id": 2, "name": "Elizabeth Cleghorn Gaskell" }
+```
+
 #### Delete an author
 
 `DELETE /api/v1/authors/:id`
@@ -673,6 +740,40 @@ Validation error (`422`):
 { "error": { "message": "Validation failed", "details": { "email": ["is not a valid email address"] } } }
 ```
 
+#### Update a reader
+
+`PATCH /api/v1/readers/:library_card_number`
+
+Changes a reader's name and/or email. Send only the fields you want to change. The library card
+number can't be changed: sending a different one gives `422` (`"can't be changed"`); sending the
+current one is allowed. Reminder emails already sent aren't affected; new ones go to the new address.
+
+**Input:** library card number in the URL, and at least one of:
+
+| Field | Rules |
+|---|---|
+| `reader.full_name` | Up to 255 characters |
+| `reader.email` | Valid email address, up to 254 characters, unique (case doesn't matter; stored in lowercase) |
+
+**Output:** `200 OK`, the reader (`library_card_number`, `full_name`, `email`)
+
+**Errors:** `400` no `reader` key or no field to change, `404` reader not found, `409` another request
+took the same email at the same moment, `422` validation failed (e.g. `"email": ["has already been taken"]`)
+
+```bash
+curl -X PATCH http://localhost:3000/api/v1/readers/100002 \
+     -H 'Content-Type: application/json' \
+     -d '{"reader": {"full_name": "Charlotte Collins", "email": "charlotte.collins@example.com"}}'
+```
+
+```json
+{
+  "library_card_number": "100002",
+  "full_name": "Charlotte Collins",
+  "email": "charlotte.collins@example.com"
+}
+```
+
 #### Delete a reader
 
 `DELETE /api/v1/readers/:library_card_number`
@@ -699,8 +800,6 @@ Error (`409`):
 
 ## 4. Things to fix or improve
 
-- [ ] **Updating books and readers.** There are no `PATCH` endpoints yet, so a typo in a title or
-  a reader's new email address can't be corrected through the API.
 - [ ] **Overdue reminders.** Only "due soon" and "due today" emails exist. Nothing is sent after the
   due date has passed. Needs a decision on how often to send them (once, daily, weekly).
 - [ ] **Authentication.** The API is open: anyone who can reach it can add, delete, borrow and
@@ -708,7 +807,5 @@ Error (`409`):
 - [ ] **Limit of borrowed books per reader.** A reader can currently borrow any number of books at once.
 - [ ] **Pagination for the list of books.** `GET /api/v1/books` returns every book in one response,
   which will get slow as the catalogue grows.
-- [ ] **Renaming authors.** There is no `PATCH /api/v1/authors/:id`, so a misspelled author name
-  can't be corrected through the API (it would fix all their books at once).
 - [ ] **Searching books and readers.** There is no way to search, e.g. books by title or author,
   or readers by name or email.

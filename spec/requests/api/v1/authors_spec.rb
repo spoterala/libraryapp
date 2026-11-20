@@ -116,6 +116,66 @@ RSpec.describe "Authors API", type: :request do
     end
   end
 
+  describe "PATCH /api/v1/authors/:id" do
+    let!(:author) { create(:author, name: "Jane Austin") }
+
+    it "renames the author, and their books show the new name" do
+      create(:book, serial_number: "000001", author: author)
+
+      patch "/api/v1/authors/#{author.id}", params: { author: { name: " Jane   Austen " } }, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(json).to eq("id" => author.id, "name" => "Jane Austen")
+
+      get "/api/v1/books/000001"
+      expect(response.parsed_body).to include("author_id" => author.id, "author" => "Jane Austen")
+    end
+
+    it "allows fixing only the letter case of the author's own name" do
+      patch "/api/v1/authors/#{author.id}", params: { author: { name: "JANE AUSTIN" } }, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(author.reload.name).to eq("JANE AUSTIN")
+    end
+
+    it "rejects a name another author already has" do
+      create(:author, name: "Jane Austen")
+
+      patch "/api/v1/authors/#{author.id}", params: { author: { name: "jane austen" } }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(json.dig("error", "details")).to eq("name" => [ "has already been taken" ])
+      expect(author.reload.name).to eq("Jane Austin")
+    end
+
+    it "returns validation errors for a blank name" do
+      patch "/api/v1/authors/#{author.id}", params: { author: { name: " " } }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(json.dig("error", "details")).to eq("name" => [ "can't be blank" ])
+    end
+
+    it "rejects a name that is not a string" do
+      patch "/api/v1/authors/#{author.id}", params: { author: { name: 1 } }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(json.dig("error", "details")).to eq("name" => [ "must be a string" ])
+    end
+
+    it "returns 400 when the author parameters are missing" do
+      patch "/api/v1/authors/#{author.id}", params: {}, as: :json
+
+      expect(response).to have_http_status(:bad_request)
+    end
+
+    it "returns 404 for an unknown id" do
+      patch "/api/v1/authors/#{author.id + 1}", params: { author: { name: "Someone" } }, as: :json
+
+      expect(response).to have_http_status(:not_found)
+      expect(json).to eq("error" => { "message" => "Author not found" })
+    end
+  end
+
   describe "DELETE /api/v1/authors/:id" do
     let!(:author) { create(:author, name: "Jane Austen") }
 

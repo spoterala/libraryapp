@@ -1,7 +1,7 @@
 module Api
   module V1
     class AuthorsController < ApplicationController
-      before_action :set_author, only: %i[show destroy]
+      before_action :set_author, only: %i[show update destroy]
 
       # GET /api/v1/authors
       def index
@@ -21,6 +21,16 @@ module Api
           render json: AuthorResource.new(author), status: :created
         else
           render_validation_errors(author)
+        end
+      end
+
+      # PATCH /api/v1/authors/:id
+      # Renames the author, e.g. to fix a misspelling. All their books show the new name.
+      def update
+        if @author.update(author_params)
+          render json: AuthorResource.new(@author)
+        else
+          render_validation_errors(@author)
         end
       end
 

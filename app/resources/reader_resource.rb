@@ -1,4 +1,4 @@
-# A reader's own details (a new reader, the reader of a loan in a book's history)
+# A reader's own details (a new or updated reader, the reader of a loan in a book's history)
 class ReaderResource
   include Alba::Resource
 

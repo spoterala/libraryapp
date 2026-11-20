@@ -1,7 +1,7 @@
 module Api
   module V1
     class BooksController < ApplicationController
-      before_action :set_book, only: %i[show destroy borrow return_book]
+      before_action :set_book, only: %i[show update destroy borrow return_book]
 
       # GET /api/v1/books
       def index
@@ -22,6 +22,18 @@ module Api
           render json: BookResource.new(book), status: :created
         else
           render_validation_errors(book)
+        end
+      end
+
+      # PATCH /api/v1/books/:serial_number
+      # Changes the title and/or author. The serial number can't be changed.
+      def update
+        reject_identifier_change!(:book, :serial_number, @book.serial_number)
+
+        if @book.update(book_update_params)
+          render json: BookResource.new(@book)
+        else
+          render_validation_errors(@book)
         end
       end
 
@@ -55,6 +67,10 @@ module Api
 
       def book_params
         expect_typed_params(:book, serial_number: String, title: String, author_id: Integer)
+      end
+
+      def book_update_params
+        expect_typed_params(:book, title: String, author_id: Integer)
       end
     end
   end

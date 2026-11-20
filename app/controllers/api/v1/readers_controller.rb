@@ -1,7 +1,7 @@
 module Api
   module V1
     class ReadersController < ApplicationController
-      before_action :set_reader, only: %i[show destroy]
+      before_action :set_reader, only: %i[show update destroy]
 
       # GET /api/v1/readers
       def index
@@ -26,6 +26,18 @@ module Api
         end
       end
 
+      # PATCH /api/v1/readers/:library_card_number
+      # Changes the name and/or email. The library card number can't be changed.
+      def update
+        reject_identifier_change!(:reader, :library_card_number, @reader.library_card_number)
+
+        if @reader.update(reader_update_params)
+          render json: ReaderResource.new(@reader)
+        else
+          render_validation_errors(@reader)
+        end
+      end
+
       # DELETE /api/v1/readers/:library_card_number
       # Not allowed while the reader has any borrow records, so the borrowing history is kept
       def destroy
@@ -44,6 +56,10 @@ module Api
 
       def reader_params
         expect_typed_params(:reader, library_card_number: String, full_name: String, email: String)
+      end
+
+      def reader_update_params
+        expect_typed_params(:reader, full_name: String, email: String)
       end
     end
   end

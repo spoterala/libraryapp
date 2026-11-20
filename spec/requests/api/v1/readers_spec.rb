@@ -171,6 +171,96 @@ RSpec.describe "Readers API", type: :request do
     end
   end
 
+  describe "PATCH /api/v1/readers/:library_card_number" do
+    let!(:reader) do
+      create(:reader, library_card_number: "100001", full_name: "Elizabeth Bennet",
+                      email: "elizabeth.bennet@example.com")
+    end
+
+    it "changes the name and the email, storing the email trimmed and lowercased" do
+      patch "/api/v1/readers/100001",
+            params: { reader: { full_name: "Elizabeth Darcy", email: " Elizabeth.Darcy@Example.com" } }, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(json).to eq("library_card_number" => "100001", "full_name" => "Elizabeth Darcy",
+                         "email" => "elizabeth.darcy@example.com")
+      expect(reader.reload).to have_attributes(full_name: "Elizabeth Darcy", email: "elizabeth.darcy@example.com")
+    end
+
+    it "changes only the fields that are sent" do
+      patch "/api/v1/readers/100001", params: { reader: { email: "lizzy@example.com" } }, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(json).to include("full_name" => "Elizabeth Bennet", "email" => "lizzy@example.com")
+    end
+
+    it "accepts the current card number, e.g. when the whole reader is sent back" do
+      patch "/api/v1/readers/100001",
+            params: { reader: { library_card_number: "100001", full_name: "Elizabeth Darcy" } }, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(reader.reload.full_name).to eq("Elizabeth Darcy")
+    end
+
+    it "refuses to change the card number" do
+      patch "/api/v1/readers/100001", params: { reader: { library_card_number: "100002" } }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(json.dig("error", "details")).to eq("library_card_number" => [ "can't be changed" ])
+      expect(reader.reload.library_card_number).to eq("100001")
+    end
+
+    it "returns validation errors for invalid data" do
+      patch "/api/v1/readers/100001", params: { reader: { full_name: "", email: "not-an-email" } }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(json.dig("error", "details")).to eq("full_name" => [ "can't be blank" ],
+                                                 "email" => [ "is not a valid email address" ])
+      expect(reader.reload.full_name).to eq("Elizabeth Bennet")
+    end
+
+    it "rejects an email that another reader already has" do
+      create(:reader, email: "jane.bennet@example.com")
+
+      patch "/api/v1/readers/100001", params: { reader: { email: "Jane.Bennet@example.com" } }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(json.dig("error", "details")).to eq("email" => [ "has already been taken" ])
+    end
+
+    it "rejects values that are not strings" do
+      patch "/api/v1/readers/100001", params: { reader: { full_name: [ "Lizzy" ], email: 1 } }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(json.dig("error", "details")).to eq("full_name" => [ "must be a string" ],
+                                                 "email" => [ "must be a string" ])
+    end
+
+    it "returns 409 when the database catches a duplicate the validation missed" do
+      allow_any_instance_of(Reader).to receive(:update).and_raise(ActiveRecord::RecordNotUnique)
+
+      patch "/api/v1/readers/100001", params: { reader: { email: "lizzy@example.com" } }, as: :json
+
+      expect(response).to have_http_status(:conflict)
+      expect(json).to eq("error" => { "message" => "Conflicts with an existing record" })
+    end
+
+    it "returns 400 when there is nothing to change" do
+      [ {}, { reader: {} }, { reader: { phone: "123" } } ].each do |params|
+        patch "/api/v1/readers/100001", params: params, as: :json
+
+        expect(response).to have_http_status(:bad_request)
+      end
+    end
+
+    it "returns 404 for an unknown card number" do
+      patch "/api/v1/readers/999999", params: { reader: { full_name: "Nobody" } }, as: :json
+
+      expect(response).to have_http_status(:not_found)
+      expect(json).to eq("error" => { "message" => "Reader not found" })
+    end
+  end
+
   describe "DELETE /api/v1/readers/:library_card_number" do
     let!(:reader) { create(:reader, library_card_number: "100001") }
 

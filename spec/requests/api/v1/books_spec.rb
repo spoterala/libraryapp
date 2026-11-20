@@ -169,6 +169,92 @@ RSpec.describe "Books API", type: :request do
     end
   end
 
+  describe "PATCH /api/v1/books/:serial_number" do
+    let!(:austen) { create(:author, name: "Jane Austen") }
+    let!(:gaskell) { create(:author, name: "Elizabeth Gaskell") }
+    let!(:book) { create(:book, serial_number: "000123", title: "Emma", author: austen) }
+
+    it "changes the title and the author" do
+      patch "/api/v1/books/000123", params: { book: { title: "North and South", author_id: gaskell.id } }, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(json).to eq("serial_number" => "000123", "title" => "North and South",
+                         "author_id" => gaskell.id, "author" => "Elizabeth Gaskell",
+                         "status" => "available", "due_date" => nil)
+      expect(book.reload).to have_attributes(title: "North and South", author: gaskell)
+    end
+
+    it "changes only the fields that are sent, and keeps a borrowed book borrowed" do
+      loan = create(:borrow_record, book: book)
+
+      patch "/api/v1/books/000123", params: { book: { title: "Emma: A Novel" } }, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(json).to include("title" => "Emma: A Novel", "author_id" => austen.id,
+                              "status" => "borrowed", "due_date" => loan.due_date.iso8601)
+    end
+
+    it "accepts the current serial number, e.g. when the whole book is sent back" do
+      patch "/api/v1/books/000123", params: { book: { serial_number: "000123", title: "Persuasion" } }, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(book.reload.title).to eq("Persuasion")
+    end
+
+    it "refuses to change the serial number" do
+      patch "/api/v1/books/000123", params: { book: { serial_number: "000999", title: "Persuasion" } }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(json.dig("error", "details")).to eq("serial_number" => [ "can't be changed" ])
+      expect(book.reload).to have_attributes(serial_number: "000123", title: "Emma")
+    end
+
+    it "returns validation errors for a blank title or a missing author" do
+      patch "/api/v1/books/000123", params: { book: { title: "", author_id: nil } }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(json.dig("error", "details")).to eq("title" => [ "can't be blank" ],
+                                                 "author_id" => [ "can't be blank" ])
+      expect(book.reload).to have_attributes(title: "Emma", author: austen)
+    end
+
+    it "refuses an author id that doesn't exist" do
+      patch "/api/v1/books/000123", params: { book: { author_id: gaskell.id + 1 } }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(json.dig("error", "details")).to eq("author_id" => [ "doesn't match any author" ])
+    end
+
+    it "rejects values of the wrong type" do
+      patch "/api/v1/books/000123", params: { book: { title: 42, author_id: gaskell.id.to_s } }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(json.dig("error", "details")).to eq("title" => [ "must be a string" ],
+                                                 "author_id" => [ "must be an integer" ])
+      expect(book.reload.title).to eq("Emma")
+    end
+
+    it "returns 400 when there is nothing to change" do
+      [ {}, { book: {} }, { book: { isbn: "123" } } ].each do |params|
+        patch "/api/v1/books/000123", params: params, as: :json
+
+        expect(response).to have_http_status(:bad_request)
+        expect(json.dig("error", "message")).to be_present
+      end
+    end
+
+    it "returns 404 for an unknown or deleted book" do
+      book.soft_delete
+
+      patch "/api/v1/books/000123", params: { book: { title: "Persuasion" } }, as: :json
+      expect(response).to have_http_status(:not_found)
+      expect(json).to eq("error" => { "message" => "Book not found" })
+
+      patch "/api/v1/books/999999", params: { book: { title: "Persuasion" } }, as: :json
+      expect(response).to have_http_status(:not_found)
+    end
+  end
+
   describe "DELETE /api/v1/books/:serial_number" do
     let!(:book) { create(:book, serial_number: "000123") }
 
@@ -367,7 +453,7 @@ RSpec.describe "Books API", type: :request do
     end
 
     it "returns 404 for a method the path doesn't support" do
-      patch "/api/v1/books/000123"
+      delete "/api/v1/books"
 
       expect(response).to have_http_status(:not_found)
       expect(json.dig("error", "message")).to eq("Not found")

@@ -59,6 +59,17 @@ class ApplicationController < ActionController::API
     params.expect(root => types.keys)
   end
 
+  # A PATCH can't change the number used in the URL (a book's serial number, a reader's card
+  # number). Sending the current value is fine, e.g. a client sending the whole record back; a
+  # different value gets 422 instead of being silently ignored.
+  def reject_identifier_change!(root, attribute, current_value)
+    attributes = params[root]
+    return unless attributes.is_a?(ActionController::Parameters) && attributes.key?(attribute)
+    return if attributes[attribute] == current_value
+
+    raise InvalidInputError, { attribute => [ "can't be changed" ] }
+  end
+
   def require_types!(attributes, types)
     details = types.each_with_object({}) do |(key, type), errors|
       value = attributes[key]
