@@ -92,6 +92,37 @@ RSpec.describe BorrowRecord, type: :model do
     end
   end
 
+  describe "borrow limit" do
+    it "allows #{Reader::MAX_BORROWED_BOOKS} books borrowed at once" do
+      expect(Reader::MAX_BORROWED_BOOKS).to eq(5)
+      create_list(:borrow_record, 4, reader: reader)
+
+      expect(record).to be_valid
+    end
+
+    it "refuses a new loan when the reader already has #{Reader::MAX_BORROWED_BOOKS} books" do
+      create_list(:borrow_record, 5, reader: reader)
+
+      expect(record).not_to be_valid
+      expect(record.errors.of_kind?(:reader, :borrow_limit)).to be(true)
+      expect(record.errors[:reader]).to eq([ "already has 5 borrowed books, the most allowed at once" ])
+    end
+
+    it "doesn't count returned books" do
+      create_list(:borrow_record, 4, reader: reader)
+      create_list(:borrow_record, 3, :returned, reader: reader)
+
+      expect(record).to be_valid
+    end
+
+    it "doesn't apply to existing loans, e.g. when returning one" do
+      record.save!
+      create_list(:borrow_record, 4, reader: reader)
+
+      expect(record.update(return_date: Date.new(2026, 11, 20))).to be(true)
+    end
+  end
+
   describe "#borrowed_date" do
     it "is required" do
       record.borrowed_date = nil

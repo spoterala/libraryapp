@@ -23,6 +23,7 @@ class BorrowRecord < ApplicationRecord
                                  message: "is already borrowed and not returned yet" },
                    if: :not_returned?
   validate :book_not_deleted, on: :create
+  validate :reader_under_borrow_limit, on: :create
   validates :borrowed_date, presence: true
   # On create, a missing due_date is filled in by set_due_date (which runs after validation)
   validates :due_date, presence: true, on: :update
@@ -59,6 +60,14 @@ class BorrowRecord < ApplicationRecord
 
   def book_not_deleted
     errors.add(:book, "has been deleted") if book&.deleted?
+  end
+
+  def reader_under_borrow_limit
+    return unless reader && not_returned?
+    return if reader.borrow_records.not_returned.count < Reader::MAX_BORROWED_BOOKS
+
+    errors.add(:reader, :borrow_limit,
+               message: "already has #{Reader::MAX_BORROWED_BOOKS} borrowed books, the most allowed at once")
   end
 
   # Default loan period: due LOAN_PERIOD after borrowing, unless a due_date was given

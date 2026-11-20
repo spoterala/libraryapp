@@ -187,7 +187,7 @@ All endpoints are under `/api/v1/`. Requests and responses are JSON.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/v1/books` | [List books](#list-books) |
+| `GET` | `/api/v1/books` | [List books (paginated)](#list-books) |
 | `GET` | `/api/v1/books/:serial_number` | [Show a book with its borrowing history](#show-a-book) |
 | `POST` | `/api/v1/books` | [Add a book](#add-a-book) |
 | `PATCH` | `/api/v1/books/:serial_number` | [Update a book](#update-a-book) |
@@ -220,7 +220,7 @@ field and is only present for `422`.
 | `400 Bad Request` | The required top-level key (`book` / `author` / `reader`) is missing, or (for `PATCH`) has no field that can be changed | `param is missing or the value is empty or invalid: book` |
 | `400 Bad Request` | The request body is not valid JSON | `Request body is not valid JSON` |
 | `404 Not Found` | No book / author / reader with that number or id, or the path doesn't exist | `Book not found`, `Not found` |
-| `409 Conflict` | The action isn't allowed in the current state (e.g. the book is already borrowed) | `Book is already borrowed` |
+| `409 Conflict` | The action isn't allowed in the current state (e.g. the book is already borrowed, or the reader has 5 books) | `Book is already borrowed` |
 | `422 Unprocessable Content` | Validation failed (with `details`) | `Validation failed` |
 
 ---
@@ -229,13 +229,27 @@ field and is only present for `422`.
 
 #### List books
 
-`GET /api/v1/books`
+`GET /api/v1/books?page=1&per_page=20`
 
-Returns all books, ordered by serial number.
+Returns the books one page at a time, ordered by serial number. Deleted books aren't included.
 
-**Input:** none
+**Input:** optional query parameters
 
-**Output:** `200 OK`
+| Parameter | Default | Rules |
+|---|---|---|
+| `page` | `1` | Whole number, 1 or more. A page after the last one returns an empty `books` list. |
+| `per_page` | `20` | Whole number from 1 to 100 |
+
+Anything else (`0`, `-1`, `2.5`, `abc`, more than 100) gets `422`, e.g.
+`"details": {"per_page": ["must be a whole number from 1 to 100"]}`.
+
+**Output:** `200 OK`, an object with:
+
+- `books`: the books on this page
+- `meta`: `page`, `per_page`, `total_count` (all books, on every page) and `total_pages`
+  (`0` when there are no books)
+
+Each book has:
 
 | Field | Description |
 |---|---|
@@ -247,28 +261,31 @@ Returns all books, ordered by serial number.
 | `due_date` | When the book must be returned, or `null` if it is available |
 
 ```bash
-curl http://localhost:3000/api/v1/books
+curl 'http://localhost:3000/api/v1/books?page=1&per_page=2'
 ```
 
 ```json
-[
-  {
-    "serial_number": "000001",
-    "title": "Pride and Prejudice",
-    "author_id": 1,
-    "author": "Jane Austen",
-    "status": "borrowed",
-    "due_date": "2026-11-20"
-  },
-  {
-    "serial_number": "000002",
-    "title": "Emma",
-    "author_id": 1,
-    "author": "Jane Austen",
-    "status": "available",
-    "due_date": null
-  }
-]
+{
+  "books": [
+    {
+      "serial_number": "000001",
+      "title": "Pride and Prejudice",
+      "author_id": 1,
+      "author": "Jane Austen",
+      "status": "borrowed",
+      "due_date": "2026-11-20"
+    },
+    {
+      "serial_number": "000002",
+      "title": "Emma",
+      "author_id": 1,
+      "author": "Jane Austen",
+      "status": "available",
+      "due_date": null
+    }
+  ],
+  "meta": { "page": 1, "per_page": 2, "total_count": 5, "total_pages": 3 }
+}
 ```
 
 #### Show a book
@@ -428,7 +445,8 @@ Error (`409`):
 `POST /api/v1/books/:serial_number/borrow`
 
 Lends the book to a reader. The borrowed date is today and the due date is today + 30 days.
-Neither can be set by the client.
+Neither can be set by the client. A reader can have at most **5 books** borrowed at once (not
+returned yet); after that they must return one before borrowing another.
 
 **Input:**
 
@@ -447,7 +465,8 @@ Neither can be set by the client.
 | `return_date` | `null` |
 
 **Errors:** `404` book not found, `422` card number missing, not a string, or no reader with that card number,
-`409` book is already borrowed (always this status and message, also when two requests borrow the book at the same moment)
+`409` book is already borrowed (always this status and message, also when two requests borrow the book at the same moment),
+`409` the reader already has 5 books borrowed
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/books/000002/borrow \
@@ -476,6 +495,12 @@ Already borrowed (`409`):
 
 ```json
 { "error": { "message": "Book is already borrowed" } }
+```
+
+Borrow limit reached (`409`):
+
+```json
+{ "error": { "message": "Reader has reached the limit of 5 borrowed books" } }
 ```
 
 #### Return a book
@@ -804,8 +829,5 @@ Error (`409`):
   due date has passed. Needs a decision on how often to send them (once, daily, weekly).
 - [ ] **Authentication.** The API is open: anyone who can reach it can add, delete, borrow and
   return books, and see readers' email addresses.
-- [ ] **Limit of borrowed books per reader.** A reader can currently borrow any number of books at once.
-- [ ] **Pagination for the list of books.** `GET /api/v1/books` returns every book in one response,
-  which will get slow as the catalogue grows.
 - [ ] **Searching books and readers.** There is no way to search, e.g. books by title or author,
   or readers by name or email.

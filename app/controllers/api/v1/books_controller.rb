@@ -3,10 +3,11 @@ module Api
     class BooksController < ApplicationController
       before_action :set_book, only: %i[show update destroy borrow return_book]
 
-      # GET /api/v1/books
+      # GET /api/v1/books?page=1&per_page=20
       def index
-        books = Book.kept.includes(:author, :current_borrow_record).order(:serial_number)
-        render json: BookResource.new(books)
+        pagination = Pagination.new(page: params[:page], per_page: params[:per_page])
+        books = pagination.apply(Book.kept.includes(:author, :current_borrow_record).order(:serial_number))
+        render json: { books: BookResource.new(books).serializable_hash, meta: pagination.meta }
       end
 
       # GET /api/v1/books/:serial_number

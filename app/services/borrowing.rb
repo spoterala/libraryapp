@@ -1,9 +1,11 @@
-# Lending books to readers and taking them back.
+# Lending books to readers and taking them back. A reader can have at most
+# Reader::MAX_BORROWED_BOOKS books borrowed at once.
 # Raises InvalidInputError for bad input and ConflictError when the book's state doesn't
 # allow the action; ApplicationController turns them into 422 and 409 responses.
 module Borrowing
   ALREADY_BORROWED = "Book is already borrowed"
   NOT_BORROWED = "Book is not borrowed"
+  BORROW_LIMIT_REACHED = "Reader has reached the limit of #{Reader::MAX_BORROWED_BOOKS} borrowed books".freeze
 
   module_function
 
@@ -12,10 +14,16 @@ module Borrowing
     reader = find_reader(reader_card_number)
     raise ConflictError, ALREADY_BORROWED if book.borrowed?
 
-    record = book.borrow_by(reader)
+    record = Reader.transaction do
+      # Loans to the same reader wait for each other here, so two at the same moment can't both
+      # pass the borrow limit check (BorrowRecord validation)
+      reader.lock!
+      book.borrow_by(reader)
+    end
     return record if record.persisted?
     # Another request lent the book after the check above, and the model validation caught it
     raise ConflictError, ALREADY_BORROWED if record.errors.of_kind?(:book, :taken)
+    raise ConflictError, BORROW_LIMIT_REACHED if record.errors.of_kind?(:reader, :borrow_limit)
 
     raise ActiveRecord::RecordInvalid, record
   rescue ActiveRecord::RecordNotUnique # the database unique index caught a simultaneous loan

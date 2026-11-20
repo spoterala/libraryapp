@@ -1,6 +1,7 @@
 class Reader < ApplicationRecord
   FULL_NAME_MAX_LENGTH = 255
   EMAIL_MAX_LENGTH = 254 # the longest valid email address
+  MAX_BORROWED_BOOKS = 5 # books borrowed at the same time (not returned yet)
 
   has_many :borrow_records, dependent: :restrict_with_error
 

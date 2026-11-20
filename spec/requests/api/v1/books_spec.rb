@@ -8,7 +8,8 @@ RSpec.describe "Books API", type: :request do
       get "/api/v1/books"
 
       expect(response).to have_http_status(:ok)
-      expect(json).to eq([])
+      expect(json).to eq("books" => [],
+                         "meta" => { "page" => 1, "per_page" => 20, "total_count" => 0, "total_pages" => 0 })
     end
 
     it "lists books ordered by serial number, with their availability" do
@@ -21,13 +22,70 @@ RSpec.describe "Books API", type: :request do
 
       get "/api/v1/books"
 
+      books = json["books"]
       expect(response).to have_http_status(:ok)
-      expect(json.map { it["serial_number"] }).to eq(%w[000001 000002 000003])
-      expect(json[0]).to include("status" => "borrowed", "due_date" => loan.due_date.iso8601)
-      expect(json[1]).to eq("serial_number" => available.serial_number, "title" => "Pride and Prejudice",
+      expect(books.map { it["serial_number"] }).to eq(%w[000001 000002 000003])
+      expect(books[0]).to include("status" => "borrowed", "due_date" => loan.due_date.iso8601)
+      expect(books[1]).to eq("serial_number" => available.serial_number, "title" => "Pride and Prejudice",
                             "author_id" => austen.id, "author" => "Jane Austen",
                             "status" => "available", "due_date" => nil)
-      expect(json[2]).to include("status" => "available", "due_date" => nil)
+      expect(books[2]).to include("status" => "available", "due_date" => nil)
+    end
+
+    describe "pagination" do
+      before do
+        (1..45).each { |n| create(:book, serial_number: format("%06d", n)) }
+        Book.find_by!(serial_number: "000045").soft_delete # deleted books aren't counted
+      end
+
+      def serial_numbers = json["books"].map { it["serial_number"] }
+
+      it "returns the first 20 books by default" do
+        get "/api/v1/books"
+
+        expect(serial_numbers).to eq((1..20).map { format("%06d", it) })
+        expect(json["meta"]).to eq("page" => 1, "per_page" => 20, "total_count" => 44, "total_pages" => 3)
+      end
+
+      it "returns the requested page and page size" do
+        get "/api/v1/books", params: { page: "3", per_page: "20" }
+
+        expect(serial_numbers).to eq((41..44).map { format("%06d", it) })
+        expect(json["meta"]).to eq("page" => 3, "per_page" => 20, "total_count" => 44, "total_pages" => 3)
+      end
+
+      it "allows up to 100 books per page" do
+        get "/api/v1/books", params: { per_page: "100" }
+
+        expect(serial_numbers.size).to eq(44)
+        expect(json["meta"]).to include("per_page" => 100, "total_pages" => 1)
+      end
+
+      it "returns an empty page after the last one" do
+        get "/api/v1/books", params: { page: "4" }
+
+        expect(response).to have_http_status(:ok)
+        expect(json["books"]).to eq([])
+        expect(json["meta"]).to include("page" => 4, "total_count" => 44)
+      end
+
+      it "returns 422 for a page or page size that isn't a whole number in range" do
+        [ [ "0", "0" ], [ "-1", "101" ], [ "2.5", "abc" ], [ "", " 5" ] ].each do |page, per_page|
+          get "/api/v1/books", params: { page: page, per_page: per_page }
+
+          expect(response).to have_http_status(:unprocessable_content)
+          expect(json).to eq("error" => { "message" => "Validation failed",
+                                          "details" => { "page" => [ "must be a whole number of 1 or more" ],
+                                                         "per_page" => [ "must be a whole number from 1 to 100" ] } })
+        end
+      end
+
+      it "returns 422 for a page sent as an array" do
+        get "/api/v1/books?page[]=1"
+
+        expect(response).to have_http_status(:unprocessable_content)
+        expect(json.dig("error", "details")).to eq("page" => [ "must be a whole number of 1 or more" ])
+      end
     end
   end
 
@@ -281,7 +339,7 @@ RSpec.describe "Books API", type: :request do
       delete "/api/v1/books/000123"
 
       get "/api/v1/books"
-      expect(json).to eq([])
+      expect(json["books"]).to eq([])
       get "/api/v1/books/000123"
       expect(response).to have_http_status(:not_found)
       post "/api/v1/books/000123/borrow", params: { reader_card_number: create(:reader).library_card_number },
@@ -353,6 +411,17 @@ RSpec.describe "Books API", type: :request do
 
       expect(response).to have_http_status(:conflict)
       expect(json.dig("error", "message")).to eq("Book is already borrowed")
+    end
+
+    it "refuses a reader who already has 5 books borrowed" do
+      create_list(:borrow_record, 5, reader: reader)
+
+      expect do
+        post "/api/v1/books/000123/borrow", params: { reader_card_number: "000042" }, as: :json
+      end.not_to change(BorrowRecord, :count)
+
+      expect(response).to have_http_status(:conflict)
+      expect(json).to eq("error" => { "message" => "Reader has reached the limit of 5 borrowed books" })
     end
 
     it "returns 422 for an unknown reader card number" do

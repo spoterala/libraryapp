@@ -46,6 +46,28 @@ RSpec.describe Borrowing do
         .to raise_error(ActiveRecord::RecordInvalid, /Book has been deleted/)
     end
 
+    context "when the reader already has #{Reader::MAX_BORROWED_BOOKS} books" do
+      before { create_list(:borrow_record, Reader::MAX_BORROWED_BOOKS, reader: reader) }
+
+      it "refuses another loan" do
+        expect { described_class.borrow(book, reader_card_number: reader.library_card_number) }
+          .to raise_error(ConflictError, "Reader has reached the limit of 5 borrowed books")
+        expect(book).to be_available
+      end
+
+      it "lends again once one of them is returned" do
+        reader.borrow_records.first.mark_returned!
+
+        expect(described_class.borrow(book, reader_card_number: reader.library_card_number)).to be_persisted
+      end
+    end
+
+    it "locks the reader while lending, so two loans at once can't both pass the limit" do
+      expect_any_instance_of(Reader).to receive(:lock!).and_call_original
+
+      described_class.borrow(book, reader_card_number: reader.library_card_number)
+    end
+
     context "when another request borrows the book at the same moment" do
       # The other loan appears after the availability check
       before do
